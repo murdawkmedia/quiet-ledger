@@ -1,4 +1,4 @@
-# Fictional Hermes demo workers
+# Fictional demo inference workers
 
 Riley (client) and Jordan (accountant) use the actual Hermes `AIAgent`, pinned to
 the public 0.22.5 source commit
@@ -6,6 +6,8 @@ the public 0.22.5 source commit
 the explicitly fictional Marmot Field Lab, using a shared company brief and
 distinct personas. Quiet Ledger renders money and recorded status from the
 latest trusted case. Model prose cannot change financial records.
+Jordan can instead use the separate Codex subscription worker below; Riley's
+Hermes runtime and configuration remain independent.
 
 This service is inference only. The separate native MDK controller owns the two
 Marmot identities, MLS messages, role admission, room leases and reply publishing.
@@ -23,7 +25,7 @@ Marmot transport does not make cloud inference local or hide relay metadata.
 
 ## Build and run in a container
 
-Docker is the required filesystem boundary for a hosted demo. The image contains
+Docker is the required filesystem boundary for the hosted Hermes worker. The image contains
 only public code and hash-locked Python dependencies, without a personal Hermes
 installation or native credential database. Its build context is this directory.
 No secrets enter the image/build arguments. Source, base image and dependencies
@@ -73,9 +75,66 @@ using that venv and explicit `QUIET_LEDGER_HERMES_SOURCE`,
 The default listener remains loopback. Host development is suitable for harmless
 fictional tests; use the container boundary for visitors.
 
+## Jordan through a Codex subscription
+
+`codex_worker.py` uses the installed native `codex app-server --listen stdio://`
+with the operator's existing ChatGPT login. Jordan is fixed to `gpt-6-luna` with
+reasoning effort `max`; no model, provider or API-key fallback is available. The
+worker accepts only the fictional `accountant` role. It shares the exact company
+brief, persona, rules, current case and bounded same-room history used by Hermes.
+
+Run it on the machine that already owns the separately authorized native Codex
+login. Do not mount or copy a personal Codex/auth directory into the app or its
+container, run a login flow, or provide a model API credential file. Verify the
+installed native version before operation; operators may pin an existing
+executable with `QUIET_LEDGER_CODEX_BINARY`. This worker does not install or
+update Codex. Create a private mode-0700 state directory outside source and its
+repository/workspace ancestors, then set paths only:
+
+```sh
+export QUIET_LEDGER_WORKER_TOKEN_FILE=/absolute/private/demo-worker-token
+export QUIET_LEDGER_CODEX_STATE=/absolute/private/demo-codex-state
+python3 -I -B agents/demo/codex_worker.py
+```
+
+The existing private service token has the same owner, mode-0600 and nonsymlink
+requirements as Hermes. The listener is restricted to `127.0.0.1`, default port
+`4441`; `--port` can select another loopback port. Reach it from another host only
+through an authenticated private transport. Its `/health` reports
+`runtime:"codex"`, `model:"gpt-6-luna"`, `reasoningEffort:"max"` and configured
+`ready:true` without calling the model. Subscription/login readiness is verified
+on inference and failures are sanitized. App routing must explicitly select this
+worker for Jordan; this process does not change the Hermes service.
+
+Each request launches a new native process group in a fresh mode-0700 directory,
+outside the vault. Its environment retains only `PATH`, `HOME`, locale and standard
+TLS certificate paths; provider/API/MCP variables and `CODEX_HOME` are removed.
+Native Codex alone accesses its canonical auth store. The wrapper reads only
+native configuration to discover MCP server names, then explicitly disables each
+server: an empty `mcp_servers` override alone merges existing definitions. Before
+starting a model turn it verifies the effective feature/tool configuration, native
+ChatGPT login type, empty MCP tools, exact model/provider/effort, read-only sandbox
+and absence of loaded instruction files. Shell, execution, apps, delegation,
+hooks, skill discovery, image viewing/generation, browser/computer use, plugins,
+goals, sleep/tool suggestion, web search and project-document loading are disabled;
+capability roots and dynamic tools are empty. Native image features are disabled
+through `features.view_image` and `features.image_generation` and checked in the
+effective configuration.
+
+Native tool and approval requests are rejected, and unexpected tool items or
+protocol events fail closed. Only a final agent message from the current thread
+and turn can become a reply, through the existing strict JSON and financial-prose
+validators. Partial prose, reasoning and account/token events are discarded, and
+native stderr and HTTP access logs are suppressed. The wrapper does not log
+prompts, replies, credentials or transcripts. The normal deadline is 27 seconds;
+stdout is capped at two MiB, each line at 256 KiB and each session at 4096 events.
+The process group is terminated and reaped and its fresh directory removed on
+success, rejection or timeout. HTTP/authentication, quotas, cache and connection
+limits are shared with Hermes. No model credential is returned to the app.
+
 ## HTTP contract
 
-`GET /health` returns runtime, configured readiness, model, pinned release/commit
+`GET /health` returns runtime, configured readiness, model, Hermes release/commit
 and fictional-only mode. It does not call the model, check provider credit, or
 return secrets. A provider failure is surfaced on the inference request.
 
@@ -145,6 +204,7 @@ logged. HTTP access logs are disabled.
 
 ```sh
 python3 -m unittest discover -s tests -p test_demo_agent_worker.py -v
+python3 -m unittest discover -s tests -p test_codex_demo_worker.py -v
 ```
 
 The tests use a fixture agent and cover authentication before inference, strict
@@ -154,3 +214,8 @@ no-tool construction, child success/cleanup and hard timeout.
 Real provider smoke tests are separate, use only fictional requests, and require
 the explicitly authorized free provider credential. Do not run live tests as an
 automatic unit-test side effect.
+Codex tests use a fake native subprocess, including merged MCP configuration,
+exact model/effort, API-login rejection, isolated environment and temporary
+directory, final-message validation, protocol bounds and process-group cleanup.
+Actual subscription acceptance is a separate fictional test against the existing
+authorized native login.

@@ -33,6 +33,27 @@ class WorkerContract(unittest.TestCase):
     def setUpClass(cls):
         cls.w = load()
 
+    def test_runtime_tag_is_explicit_and_keeps_hermes_default(self):
+        service = self.w.InferenceService(token='t'*43, model='gpt-6-luna',
+                                         infer=lambda p: answer(), runtime='codex')
+        self.assertEqual(service.health(), {'runtime': 'codex', 'ready': True,
+                         'model': 'gpt-6-luna', 'mode': 'fictional-conversation-only'})
+        self.assertEqual(service.handle('Bearer '+('t'*43), payload())['runtime'], 'codex')
+        with self.assertRaises(ValueError):
+            self.w.InferenceService(token='t'*43, model='fixture', infer=lambda p: answer(), runtime='unknown')
+
+    def test_shared_prompt_has_current_case_and_only_supplied_room_history(self):
+        self.assertTrue(callable(getattr(self.w, 'demo_prompt', None)), 'shared demo prompt is missing')
+        request = payload('accountant')
+        request['history'] = [{'speaker':'human','text':'Please review the workshop scope.'}]
+        system, human = self.w.demo_prompt(request)
+        self.assertIn('Marmot Field Lab', system)
+        self.assertIn('Jordan', system)
+        self.assertIn(json.dumps(request['case'], sort_keys=True), system)
+        self.assertIn('untrusted', system)
+        context = json.loads(human.split('\n', 1)[1])
+        self.assertEqual(context, {'history': request['history'], 'latestHumanMessage':request['text']})
+
     def test_authentication_precedes_parsing_and_inference(self):
         calls = []
         service = self.w.InferenceService(token='t'*43, model='fixture-model',

@@ -1,0 +1,14 @@
+# Optional accountant-only Codex subscription service through a private socket.
+# Establish and verify this socket before enabling the override. No public port.
+services:
+  app:
+    environment:
+      DEMO_ACCOUNTANT_RUNTIME: codex
+      CODEX_DEMO_SOCKET_FILE: /run/quiet-ledger-codex/codex.sock
+      CODEX_DEMO_TOKEN_FILE: /run/secrets/hermes-worker-token
+    volumes:
+      - type: bind
+        source: /opt/quiet-ledger/codex-bridge
+        target: /run/quiet-ledger-codex
+        read_only: true
+        bind: {create_host_path: false}

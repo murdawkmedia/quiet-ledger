@@ -11,6 +11,12 @@ of humour and asks who reviews the work. Neither represents Marmot or White Nois
 They compose short replies using a shared business brief, distinct personas and
 recent messages from the current conversation.
 
+An optional [Codex subscription backend](CODEX-DEMO.md) runs Jordan on Luna Max.
+Riley keeps Hermes. The footer identifies this selection; the default installation
+continues using Hermes for both. A failed earlier turn cannot cancel a newer
+question's waiting indicator. Encrypted queued sends retain their original ID
+when retried, so a refresh can track the correct eventual reply.
+
 **Riley** is the default direct conversation: you and Riley, two MLS members.
 **Jordan** opens a separate two-member conversation. Choose **Group** explicitly
 to create a three-member room. Switching or reloading preserves each room's own

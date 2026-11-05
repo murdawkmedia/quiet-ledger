@@ -52,5 +52,6 @@ await writeFile(resolve(output,'public/THIRD-PARTY-LICENSES.txt'),notices.join('
 for(const file of ['package.json','package-lock.json'])await copyFile(file,resolve(output,file));
 await copyFile('ops/Dockerfile.hosted',resolve(output,'Dockerfile'));
 await copyFile('ops/compose.hosted.yml',resolve(output,'compose.yml'));
+await copyFile('ops/compose.codex-hosted.yml',resolve(output,'compose-codex.yml'));
 await writeFile(resolve(output,'.dockerignore'),'public/\n.env\nsecrets/\ndata/\nbackups/\n');
 console.log('Hosted app and public assets built; no runtime data or secrets copied.');

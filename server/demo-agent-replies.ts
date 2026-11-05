@@ -21,10 +21,10 @@ function assertProse(reply:string){
 export function validateDemoInference(value:unknown):DemoInference{
  if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('Invalid Hermes reply.');
  const row=value as Record<string,unknown>;
- if(Object.keys(row).some(key=>!['runtime','model','intent','reply'].includes(key))||row.runtime!=='hermes'||typeof row.model!=='string'||!/^[A-Za-z0-9._:/-]{1,128}$/.test(row.model)||!DEMO_REPLY_INTENTS.includes(row.intent as DemoReplyIntent))throw new Error('Invalid Hermes reply.');
+ if(Object.keys(row).some(key=>!['runtime','model','intent','reply'].includes(key))||(row.runtime!=='hermes'&&row.runtime!=='codex')||typeof row.model!=='string'||!/^[A-Za-z0-9._:/-]{1,128}$/.test(row.model)||!DEMO_REPLY_INTENTS.includes(row.intent as DemoReplyIntent))throw new Error('Invalid demo inference reply.');
  if(row.reply!==undefined&&(typeof row.reply!=='string'||!row.reply.trim()||row.reply!==row.reply.trim()||Array.from(row.reply).length>1000||Buffer.byteLength(row.reply)>3000||/[\p{Cc}\p{Cf}]/u.test(row.reply.replace(/\n/g,''))||(row.reply.match(/\?/g)?.length??0)>1))throw new Error('Invalid Hermes reply text.');
  if(typeof row.reply==='string'&&!['check-total','explain-recorded-status'].includes(row.intent as string))assertProse(row.reply);
- return {runtime:'hermes',model:row.model,intent:row.intent as DemoReplyIntent,...(typeof row.reply==='string'?{reply:row.reply}:{})};
+ return {runtime:row.runtime as DemoInference['runtime'],model:row.model,intent:row.intent as DemoReplyIntent,...(typeof row.reply==='string'?{reply:row.reply}:{})};
 }
 
 export function renderDemoReply(role:DemoRole,intentOrInference:DemoReplyIntent|DemoInference,context:DemoCase):string{

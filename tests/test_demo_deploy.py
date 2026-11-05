@@ -6,7 +6,7 @@ spec=importlib.util.spec_from_file_location('ql_team_install',Path(__file__).res
 SOURCE=Path(__file__).resolve().parents[1]
 class DemoDeployTests(unittest.TestCase):
  def options(self,**values):
-  defaults=dict(revision='1234567890abcdef',base_revision=None,build_reserve_mib=1024,reuse_app_image=False,enable_demo_team=False,enable_hackathon_demo=False);defaults.update(values);return SimpleNamespace(**defaults)
+  defaults=dict(revision='1234567890abcdef',base_revision=None,build_reserve_mib=1024,reuse_app_image=False,enable_demo_team=False,enable_hackathon_demo=False,enable_codex_accountant=False);defaults.update(values);return SimpleNamespace(**defaults)
  def test_optional_flags_are_off_by_default(self):
   args=module.argument_parser().parse_args(['--revision','1234567890abcdef','--public-origin','https://demo.example','--backend-host','backend.example','--expected-host','example-host'])
   self.assertFalse(args.enable_demo_team);self.assertFalse(args.reuse_app_image);self.assertIsNone(args.base_revision);self.assertEqual(args.build_reserve_mib,1024)

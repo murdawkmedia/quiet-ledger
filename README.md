@@ -55,6 +55,8 @@ and native Marmot runtime; no model service is needed for ordinary invoicing.
 - Optional per-invoice Marmot/MLS messaging and conversational fictional clients.
   The demo defaults to a two-member Riley chat, with a separate Jordan chat and
   an explicit three-member group. See [the demo guide](docs/DEMO-TEAM.md).
+  Jordan can optionally use [Codex with the operator's subscription](docs/CODEX-DEMO.md),
+  while Riley keeps the existing Hermes connection.
 - Consistent encrypted database backups and a separate cold native-key backup.
 
 The operator holding the storage key can decrypt financial records. Agents and
