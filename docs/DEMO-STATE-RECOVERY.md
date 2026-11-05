@@ -115,3 +115,9 @@ and the three-member MLS roster persisted. A fresh human message produced a
 new decrypted Riley reply without repeated inference or financial mutations.
 That native transport/recovery test injects a typed inference fixture; actual
 Hermes inference, browser and hosted acceptance remain separate evidence.
+
+The conversational demo can hold three separate MLS rooms in the same two native
+account homes. A cold archive must preserve the whole owned homes, rather than
+selecting one group database. Browser room history and keys still require their
+original browser storage. Direct-room and group membership must be verified
+separately after recovery; a recovered group must never be relabelled as a DM.

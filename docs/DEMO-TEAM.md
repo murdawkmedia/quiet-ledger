@@ -1,96 +1,94 @@
 # The Marmot demo team
 
-Open Quiet Ledger, choose **Hackathon demo**, enter **marmot**, then **Talk to the
-demo team**. Choose **Start the demo team**. No wallet, signer extension, White
-Noise or other app is required. You are the merchant; Riley is Marmot Field Lab’s
-fictional client and Jordan is its fictional accountant. Each has a separate
-Marmot identity in the same three-member MLS room.
+Open Quiet Ledger, choose **Hackathon demo**, enter **marmot**, then open the demo
+conversation and choose **Start the demo team**. No wallet, signer extension,
+White Noise or other app is required. Use fictional information only.
 
-For a short walkthrough, choose **New demo invoice** first. Pick a reusable
-client template, choose issue/due dates, select CAD, USD or KRW, and optionally
-apply a discount and premium. Select the methods you want to accept. Save the
-invoice to open the demo team with those exact current amounts. The fictional
-starter invoice is CAD 125 with zero tax; every payment here is simulated.
+You are the merchant. Riley produces hands-on private-messaging workshops for
+fictional Marmot Field Lab; Jordan keeps its scope and invoice wording clear.
+Riley cares about useful footage and participant consent. Jordan has a dry sense
+of humour and asks who reviews the work. Neither represents Marmot or White Noise.
+They compose short replies using a shared business brief, distinct personas and
+recent messages from the current conversation.
 
-A three-minute presentation can follow this sequence:
+**Riley** is the default direct conversation: you and Riley, two MLS members.
+**Jordan** opens a separate two-member conversation. Choose **Group** explicitly
+to create a three-member room. Switching or reloading preserves each room's own
+history. Your messages stay as typed; the app adds no Riley/Jordan prefix.
+Direct messages and their model context are never copied into the other rooms.
+A colleague cannot see a direct conversation just because both work for the same
+fictional company. Group messages normally reach both; an explicit human-written
+`@Riley`, `@Jordan`, `Riley:` or `Jordan:` addresses one participant.
 
-1. Enter **marmot**, create the invoice, and start the team.
-2. Use the Riley scope prompt and Jordan total prompt to show the current case.
-3. Use the Marmot privacy prompt to explain the three separate MLS identities.
-4. Ask Jordan about recorded payment, choose **Simulate payment**, then ask again.
-5. Reload to show persisted encrypted conversation state, then pause or reset.
+## A short presentation
 
-The measured local rehearsal took about 62 seconds for invoice creation, native
-team preparation and five actual Hermes replies. This is a measured example,
-not a response-time guarantee: relay, model and hosting availability affect it.
-No actual money moves. A failed model call appears visibly; there is no scripted
-reply or paid-provider fallback.
+1. Choose **New demo invoice**. Pick a reusable client template, issue/due dates,
+   CAD, USD or KRW, optional discount/premium and accepted methods, then save.
+2. Start Riley's conversation. Ask what the company does and how your filming,
+   editing, website or workflow services could help. Continue with a follow-up.
+3. Switch to Jordan and check the current invoice total and recorded status.
+4. Choose **Simulate payment**, then ask Jordan again. Chat cannot settle invoices.
+5. Open **Group** to bring both together; reload to show each room's persisted
+   history. Ask about Marmot privacy only when you want that explanation.
 
-Pause/resume controls inference. Reset retires this team and starts a new key/room
-on the next start; it does not erase copies already received by participants.
-Refreshing or reopening the page can reconnect the same browser identity while
-its lease is valid. One team can be active on an instance at a time, for at most
-ten minutes, within the visit’s two-hour lifetime. Six human rounds are allowed;
-eight starts per visit limit repeated provisioning. A busy instance offers the
-existing manual invoice conversation while another visitor uses the AI team.
+The starter invoice is fictional CAD 125 with zero tax. Every payment in this
+demo is simulated. Model/relay availability affects response time. Failed calls
+appear visibly; there is no scripted failure response or paid-provider fallback.
+
+Pause/resume controls the whole team's inference. Reset retires all its rooms and
+starts new keys on the next start; it cannot erase copies already held by members.
+One team can be active per instance for ten minutes, within the visit's two-hour
+lifetime. Twelve human rounds are shared across all three rooms; eight starts per
+visit limit repeated provisioning. A busy instance offers the existing manual
+invoice conversation while another visitor uses the team. A legacy three-member
+room stays a group; upgrading never silently labels it a private conversation.
 
 ## What actually runs
 
-The browser uses Marmot TS 0.9.0 and holds its own human key/MLS state. Two isolated,
-pinned wn-agent 0.14.0 native processes hold Riley’s and Jordan’s keys and receive
-Welcomes from that human. A controller accepts only the authenticated human’s
-explicit `Riley:`/`Jordan:` or `@Riley`/`@Jordan` messages. Agent messages cannot
-trigger other agents. Per-connection lease identity, generation, expiry, pause,
-quotas and signed-event replay checks protect the shared instance.
+Marmot TS 0.9.0 holds the browser's human key and MLS state. Two pinned wn-agent
+0.14.0 processes hold Riley's and Jordan's separate keys. A direct room admits
+only its intended agent; the group admits both. Fresh one-use KeyPackages support
+additional rooms. The controller verifies room membership, authenticated sender,
+lease generation, expiry, pause, quotas and replay state. Agents never trigger
+other agents. Each reply refers to its human message so a delayed reply cannot
+finish an unrelated pending question.
 
-Actual pinned Hermes 0.22.5 AIAgent code performs inference in a separate restricted
-container, with no tools, personal profiles, memory, shell, files, finance API or
-MCP credentials. Each turn has a fresh request home and a bounded process lifetime.
-Riley and Jordan have distinct personas. The model selects one of five typed
-intents; the controller renders financial statements from the current verified
-fictional case, including its version and timestamp. Model prose never changes
-financial state. Pending replies retry the same versioned text/idempotency key.
-Provider failure has no paid or scripted fallback and appears as a demo issue.
+Pinned Hermes 0.22.5 AIAgent runs in a restricted container with no tools, personal
+profiles, memory, shell, file context, finance API or MCP credentials. Each turn
+uses a fresh temporary home and bounded lifetime. At most eight earlier,
+authenticated messages from this room enter its prompt, with character/byte limits.
+Hermes returns a finite intent and short prose. Financial answers discard model
+prose and render the latest verified case. Internal case version/time still guard
+stale replies; they are not printed as repeated bubble introductions. No reply
+changes financial state. Pending sends retry the same versioned idempotency key.
 
-Transport is a standard NIP-01 WebSocket relay at this app’s origin. An unguessable,
-per-lease capability is returned only to its authenticated demo visit and used by
-all three participants. Cloudflare’s proxy adds a separate private backend gate;
-it does not forward browser cookies or provider credentials into the relay.
-Only bounded signed directory events and MLS ciphertext are stored there, with
-at-rest encryption. Retired capabilities, sockets and relay rows are removed.
-No third-party public relay receives the demo. The existing private-account
-invoice conversation continues using its original private HTTP delivery.
+The same-origin NIP-01 WebSocket relay admits only registered room hashes through
+a private per-lease capability. Cloudflare adds a separate backend gate without
+forwarding browser cookies or provider credentials. The relay stores bounded
+signed directory events and MLS ciphertext with at-rest encryption. Retired
+capabilities, sockets and rows are removed. No public third-party relay receives
+this demo. Ordinary private-account invoice conversations keep their existing
+private HTTP transport.
 
-## Privacy and proof limits
+## Privacy and setup
 
-Use fictional information only. Agents, the hosting operator holding their keys,
-and the configured AI provider can read messages the agents decrypt. This is not
-a zero-knowledge AI service. Browser IndexedDB holds the human key, decrypted
-history and MLS state without extra local encryption; clearing site data loses
-access. There is no browser key backup/device transfer. Financial records remain
-operator-readable even though database payloads are encrypted. Native key homes
-use private filesystem permissions; protect the host disk as well.
+Agents, the operator holding their keys and the configured model provider can
+read the messages those agents decrypt. This is not a zero-knowledge AI service.
+Browser IndexedDB holds the human key, decrypted history and MLS state without
+extra local encryption. Clearing site data loses access; browser key backup and
+device transfer are not implemented. Financial records remain operator-readable
+although their database payloads are encrypted. Protect the host disk too.
 
-White Noise joining remains optional and disabled until an actual native phone
-join is qualified. Experimental SDK interoperability is not a production
-cryptographic audit. No funded receiving/provider/payout acceptance follows from
-this fictional demo.
+White Noise phone joining remains optional and disabled until an actual join is
+qualified. Experimental SDK interoperability is not a cryptographic audit.
+No funded receiving/provider/payout qualification follows from this demo.
 
-## Run it yourself
-
-Start with [SELF-HOSTING.md](SELF-HOSTING.md). The free account edition can run
-without Cloudflare. Agent mode is an explicit optional configuration:
-
-- `HOSTED_ACCOUNTS=true` and `HACKATHON_DEMO_ENABLED=true`;
-- `DEMO_TEAM_ENABLED=true`, a private external `DEMO_TEAM_STATE_DIR`, and the pinned
-  `MARMOT_AGENT_BINARY` path;
-- `HERMES_DEMO_URL` pointing to the isolated private worker, plus a mode0600
-  `HERMES_DEMO_TOKEN_FILE` shared only with that worker.
-
-Build/run the worker using [agents/demo/README.md](../agents/demo/README.md), with
-its own private service token and an explicitly selected provider credential.
-Credentials stay outside source and are not sent to browser participants. The
-hosted example is the generic hosted Compose example in ops/compose.demo-hosted.yml.
-[DEMO-STATE-RECOVERY.md](DEMO-STATE-RECOVERY.md) describes the separate cold backup
-for native keys/MLS; the online ledger backup does not contain browser keys or
-native daemon homes. The free core is AGPL-3.0-or-later. Optional hosted subscription billing is not implemented.
+Start with [SELF-HOSTING.md](SELF-HOSTING.md). Agent mode additionally requires
+`HOSTED_ACCOUNTS=true`, `HACKATHON_DEMO_ENABLED=true`, `DEMO_TEAM_ENABLED=true`,
+an external private `DEMO_TEAM_STATE_DIR`, the pinned `MARMOT_AGENT_BINARY`,
+`HERMES_DEMO_URL` and a mode0600 `HERMES_DEMO_TOKEN_FILE`. See the
+[worker setup](../agents/demo/README.md) and the generic hosted Compose example
+in `ops/compose.demo-hosted.yml`. Credentials stay outside source and browsers.
+[Native recovery](DEMO-STATE-RECOVERY.md) is separate from the ledger backup and
+does not include browser keys. The free core is AGPL-3.0-or-later; optional hosted
+subscription billing is not implemented.

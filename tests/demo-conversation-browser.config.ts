@@ -1,0 +1,4 @@
+import {defineConfig} from '@playwright/test';
+import {resolve} from 'node:path';
+const artifacts=resolve(process.env.QUIET_LEDGER_TEAM_ARTIFACTS??'.runtime/demo-conversation-artifacts');
+export default defineConfig({testDir:'./browser',testMatch:'demo-team.spec.ts',grep:/conversational browser|fictional demo has a browser entry/,workers:1,fullyParallel:false,timeout:90000,expect:{timeout:15000},outputDir:resolve(artifacts,'results'),reporter:[['list'],['json',{outputFile:resolve(artifacts,'report.json')}]],use:{baseURL:'http://localhost:4352',browserName:'chromium',headless:true,reducedMotion:'reduce',actionTimeout:15000,launchOptions:{executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE??'/usr/bin/chromium'},screenshot:'only-on-failure',trace:'retain-on-failure'},webServer:{command:'node --import tsx tests/demo-conversation-app.ts',cwd:resolve(import.meta.dirname,'..'),url:'http://localhost:4352/api/health',timeout:30000,reuseExistingServer:false}});

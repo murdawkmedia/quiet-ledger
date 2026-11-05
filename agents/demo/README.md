@@ -2,18 +2,22 @@
 
 Riley (client) and Jordan (accountant) use the actual Hermes `AIAgent`, pinned to
 the public 0.22.5 source commit
-`bf0203a794a07aac3ff764972ab9087baa4e4f4e`. They select a typed reply intent for
-a bounded fictional Marmot Field Lab invoice. Quiet Ledger renders money and status from the
-latest trusted case; model prose never becomes a financial record or a reply.
+`bf0203a794a07aac3ff764972ab9087baa4e4f4e`. They compose short conversational replies about
+the explicitly fictional Marmot Field Lab, using a shared company brief and
+distinct personas. Quiet Ledger renders money and recorded status from the
+latest trusted case. Model prose cannot change financial records.
 
 This service is inference only. The separate native MDK controller owns the two
 Marmot identities, MLS messages, role admission, room leases and reply publishing.
 It must recheck pause/reset/expiry and the case version after inference. Each
-role/request gets a fresh temporary Hermes home and empty conversation history.
+role/request gets a fresh temporary Hermes home. The controller may supply up to
+eight recent authenticated messages from the same room as untrusted context;
+no direct chat is shared into another room. Hermes loads no saved conversation.
 There are no tools, file/context loading, memory, background review, personal
 profiles, gateway connection, provider/account connectors or financial writes.
 
-The configured cloud model sees the admitted fictional message and case. Keep
+The configured cloud model sees the admitted fictional message, bounded same-room
+context and case. Keep
 the judge disclosure visible and ask visitors to use fictional data. Encrypted
 Marmot transport does not make cloud inference local or hide relay metadata.
 
@@ -98,9 +102,23 @@ and `Content-Type: application/json`. The backend supplies this fixed case shape
 }
 ```
 
-The response is `{"runtime":"hermes","model":"glm-5.3-flash","intent":"check-total"}`.
-Only `explain-scope`, `check-total`, `request-review`,
-`explain-recorded-status`, and `explain-marmot` are possible. Status `paid` is accepted only with
+The optional `history` field is an array of `{ "speaker": "human", "text": "..." }`
+rows. Speakers are `human`, `client` or `accountant`; history is limited to eight
+messages, a thousand characters each and six thousand total UTF-8 text bytes.
+The controller supplies only authenticated, earlier messages from this room.
+
+A response includes a model-composed `reply`, for example
+`{"runtime":"hermes","model":"glm-5.3-flash","intent":"conversation","reply":"We run hands-on private-messaging workshops. Captioned walkthroughs would help people follow along. What kind of work do you enjoy?"}`.
+Possible intents are `conversation`, `explain-scope`, `check-total`,
+`request-review`, `explain-recorded-status` and `explain-marmot`. The worker
+requires exactly an intent and reply from Hermes. Its explicit
+`request_overrides.response_format` selects the provider's JSON-object mode;
+prompt-only formatting is insufficient with the pinned Hermes base prompt. Prose is bounded to a thousand
+characters and three thousand UTF-8 bytes, with at most a single question.
+Nonfinancial prose rejects numeric digits, currency, payment/status assertions and
+sender boilerplate. For arithmetic and recorded-status intents the app discards
+model prose and renders the latest verified ledger facts. Unknown financial
+terms fail visibly rather than becoming a trusted amount or a mutation. Status `paid` is accepted only with
 `receiptRecorded:true`, still strictly in simulation. Unknown/extra fields,
 invalid amounts/currencies, invalid dates and duplicate JSON keys are rejected.
 Supported currencies are CAD, USD, KRW, EUR and GBP. Amounts are integer minor
@@ -112,10 +130,10 @@ bounds and a monotonic case version checked again before reply publishing.
 Admission authenticates before reading/parsing a prompt. Limits: 16 KiB body,
 1500 text characters, request ids of 1–160 alphanumeric/colon/underscore/hyphen
 characters, one active request per role and two overall, 30 starts/minute,
-12 HTTP connections, two Hermes iterations and a 30-second process deadline.
+12 HTTP connections, two Hermes iterations, at most 512 output tokens and a 30-second process deadline.
 An identical role/request id/body returns its cached result for ten minutes;
 changed content with the same id returns 409. The bounded 128-result cache stores
-only a keyed fingerprint and typed result. It is in memory; the native backend
+only a keyed fingerprint and validated reply. It is in memory; the native backend
 must retain its own durable message/reply deduplication and visitor turn budget.
 
 Failures return sanitized 400/401/409/413/415/429/502/504 errors. No canned or paid
@@ -131,7 +149,8 @@ python3 -m unittest discover -s tests -p test_demo_agent_worker.py -v
 
 The tests use a fixture agent and cover authentication before inference, strict
 fictional state, invalid model output, retry/idempotency/rate/concurrency, private
-file permissions, bounded HTTP parsing, no-tool construction and hard timeout.
+file permissions, bounded HTTP parsing/history, composed-reply validation, fresh financial rendering,
+no-tool construction, child success/cleanup and hard timeout.
 Real provider smoke tests are separate, use only fictional requests, and require
 the explicitly authorized free provider credential. Do not run live tests as an
 automatic unit-test side effect.

@@ -11,7 +11,7 @@ RUN python /tmp/setup-runtime.py --source-root /opt/hermes-public && rm /tmp/set
     && useradd --uid 1000 --create-home --shell /usr/sbin/nologin quietledger \
     && mkdir -p /var/lib/quiet-ledger-hermes /app/agents/demo \
     && chown 1000:1000 /var/lib/quiet-ledger-hermes && chmod 700 /var/lib/quiet-ledger-hermes
-COPY worker.py client.persona.md accountant.persona.md /app/agents/demo/
+COPY worker.py company-brief.md client.persona.md accountant.persona.md /app/agents/demo/
 ENV QUIET_LEDGER_HERMES_SOURCE=/opt/hermes-public \
     QUIET_LEDGER_HERMES_STATE=/var/lib/quiet-ledger-hermes \
     QUIET_LEDGER_WORKER_TOKEN_FILE=/run/secrets/worker-token \

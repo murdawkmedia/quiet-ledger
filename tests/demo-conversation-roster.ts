@@ -1,0 +1,13 @@
+import {MarmotClient,type GenericKeyValueStore,type NostrNetworkInterface} from '@internet-privacy/marmot-ts';
+import {getPublicKey,finalizeEvent} from 'nostr-tools';
+import {v2 as nip44} from 'nostr-tools/nip44';
+import type {DemoTeamNetwork} from '../client/demo-agent-engine';
+function scoped(store:GenericKeyValueStore<unknown>,prefix:string):GenericKeyValueStore<any>{return {getItem:key=>store.getItem(prefix+key),async setItem(key,value){await store.setItem(prefix+key,value);return value;},removeItem:key=>store.removeItem(prefix+key),async keys(){return (await store.keys()).filter(key=>key.startsWith(prefix)).map(key=>key.slice(prefix.length));},async clear(){for(const key of await store.keys())if(key.startsWith(prefix))await store.removeItem(key);}};}
+/** A separate test-only admin instance publishes a real MLS membership commit. */
+export async function injectDemoRoomMember(options:{storage:GenericKeyValueStore<unknown>;network:DemoTeamNetwork;relayUrl:string;groupId:string;memberPubkey:string}){
+ const key=(await options.storage.keys()).find(key=>/^demo-team:[a-f0-9]+:meta:identity$/.test(key));if(!key)throw new Error('The fictional browser identity is missing.');
+ const base=key.slice(0,-'meta:identity'.length),secret=await options.storage.getItem(key) as Uint8Array,pubkey=getPublicKey(secret);
+ const network:NostrNetworkInterface={async publish(relays,event){await options.network.publish(event);return Object.fromEntries(relays.map(relay=>[relay,{from:relay,ok:true}]));},request:(_relays,filters)=>options.network.query(Array.isArray(filters)?filters:[filters]),subscription(){return {subscribe(){return {unsubscribe(){}};}};},async getUserInboxRelays(){return [options.relayUrl];}};
+ const sdk=new MarmotClient({clientId:pubkey,signer:{getPublicKey:()=>pubkey,signEvent:event=>finalizeEvent(event,secret),nip44:{encrypt:(peer,text)=>nip44.encrypt(text,nip44.utils.getConversationKey(secret,peer)),decrypt:(peer,text)=>nip44.decrypt(text,nip44.utils.getConversationKey(secret,peer))}},network,groupStateStore:scoped(options.storage,base+'groups:'),keyPackageStore:scoped(options.storage,base+'packages:'),inviteStore:scoped(options.storage,base+'invites:'),ingestStateStore:scoped(options.storage,base+'ingest:'),rewindStore:scoped(options.storage,base+'rewind:'),removedMarkerStore:scoped(options.storage,base+'removed:')});
+ try{const packages=await options.network.query([{kinds:[30443],authors:[options.memberPubkey],limit:10}]);if(!packages.length)throw new Error('The fictional new member has no key package.');await sdk.groups.invite(options.groupId,packages[0]);}finally{for(const group of sdk.groups.loaded)group.dispose();sdk.groups.removeAllListeners();sdk.invites.removeAllListeners();}
+}

@@ -1,61 +1,96 @@
 import {test,expect,type Page} from '@playwright/test';
 import {writeFile} from 'node:fs/promises';
+import {resolve} from 'node:path';
 async function enter(page:Page){await page.goto('/');await page.getByRole('button',{name:'Hackathon demo',exact:true}).click();await page.getByLabel('Demo password',{exact:true}).fill('marmot');await page.getByRole('button',{name:'Enter hackathon demo',exact:true}).click();await expect(page).toHaveURL(/\/demo$/);}
-test('the fictional demo has a browser entry to its client and accountant team',async({page})=>{test.skip(Boolean(process.env.QUIET_LEDGER_TEAM_URL),'Covered by the full actual-runtime case.');await enter(page);await expect(page.getByRole('link',{name:'Talk to the demo team',exact:true})).toBeVisible();});
+const historyFor=(page:Page)=>page.getByRole('log',{name:'Demo team decrypted messages'});
+async function openRoom(page:Page,name:'Riley'|'Jordan'|'Group'){
+ await page.getByRole('tab',{name,exact:true}).click();
+ await expect(page.getByText(name==='Riley'?'You and Riley connected':name==='Jordan'?'You and Jordan connected':'You, Riley and Jordan connected',{exact:true})).toBeVisible({timeout:90000});
+}
+async function sendMessage(page:Page,text:string){await page.getByLabel('Message the demo team',{exact:true}).fill(text);await page.getByRole('button',{name:'Send message',exact:true}).click();}
+test.afterEach(async({page,baseURL})=>{
+ if(baseURL?.endsWith(':4352')){await page.request.post('/api/hackathon-demo/agents/reset').catch(()=>{});return;}
+ if(!process.env.QUIET_LEDGER_TEAM_URL)return;
+ await page.evaluate(async()=>{const session=await fetch('/api/session').then(r=>r.json());if(!session.hackathonDemo)return;await fetch('/api/hackathon-demo/agents/reset',{method:'POST',headers:{'content-type':'application/json','x-csrf-token':session.csrfToken},body:'{}'});}).catch(()=>{});
+});
+test('the fictional demo has a browser entry to its client and accountant conversations',async({page})=>{test.skip(Boolean(process.env.QUIET_LEDGER_TEAM_URL),'Covered by the full actual-runtime case.');await enter(page);await expect(page.getByRole('link',{name:'Meet Riley and Jordan',exact:true})).toBeVisible();});
 
-test.afterEach(async({page})=>{if(!process.env.QUIET_LEDGER_TEAM_URL)return;await page.evaluate(async()=>{const session=await fetch('/api/session').then(r=>r.json());if(!session.hackathonDemo)return;await fetch('/api/hackathon-demo/agents/reset',{method:'POST',headers:{'content-type':'application/json','x-csrf-token':session.csrfToken},body:'{}'});}).catch(()=>{});});
-test('actual browser, native MDK and Hermes keep conversation and ledger authority separate',async({page})=>{
-  test.skip(!process.env.QUIET_LEDGER_TEAM_URL,'Requires the separately configured actual local or hosted agent service.');
-  const started=Date.now(),metrics:{prepareSeconds?:number;replySeconds:number[];journeySeconds?:number}={replySeconds:[]};
-  await enter(page);await page.goto('/demo/new');
-  await page.getByLabel('Invoice title',{exact:true}).fill('Fictional Marmot workshop recording');
-  await page.getByLabel('Invoice currency',{exact:true}).selectOption('KRW');
-  await page.getByLabel('Item 1 unit price',{exact:true}).fill('150000');
-  await page.getByLabel('Discount (%)',{exact:true}).fill('10');await page.getByLabel('Premium (%)',{exact:true}).fill('6');
-  await page.getByLabel('Issue date',{exact:true}).fill('2026-11-05');await page.getByLabel('Due date',{exact:true}).fill('2026-11-12');
-  await page.getByRole('button',{name:'Create demo invoice',exact:true}).click();await expect(page).toHaveURL(/\/demo\/team$/);
-  const preparationStarted=Date.now();
-  await page.getByRole('button',{name:'Start the demo team',exact:true}).click();
-  await expect(page.getByText('All three participants connected',{exact:true})).toBeVisible({timeout:90000});
-  metrics.prepareSeconds=(Date.now()-preparationStarted)/1000;
-  const history=page.getByRole('log',{name:'Demo team decrypted messages'});
-  let firstMessage=true;
-  async function send(role:string,text:string,reply:RegExp){const sent=Date.now();await page.getByRole('combobox',{name:'Talk to',exact:true}).selectOption(role);await page.getByLabel('Message the demo team',{exact:true}).fill(text);let release:(()=>void)|undefined;if(firstMessage){firstMessage=false;let reached!:()=>void;const held=new Promise<void>(resolve=>reached=resolve);const ready=new Promise<void>(resolve=>release=resolve);let armed=true;await page.route('**/api/hackathon-demo/agents',async route=>{if(armed&&route.request().method()==='GET'){armed=false;reached();await ready;}await route.continue();});await held;}await page.getByRole('button',{name:'Send message',exact:true}).click();release?.();await expect(history.getByText(reply)).toBeVisible({timeout:60000});metrics.replySeconds.push((Date.now()-sent)/1000);}
-  await send('client','What does the fictional workshop include?',/Riley, the AI demo client.*Fictional Marmot workshop recording.*KRW 144,000/);
-  await send('accountant','Please check the total and tax on this invoice.',/Jordan, the AI demo accountant.*subtotal KRW 150,000.*discount KRW 15,000.*premium KRW 9,000.*total KRW 144,000/i);
-  await send('accountant','I paid. What payment status is recorded in the ledger?',/Jordan, the AI demo accountant.*No payment is recorded/);
-  await expect(page.getByText('Awaiting payment',{exact:true})).toBeVisible();
-  await page.getByRole('button',{name:'Pause agents',exact:true}).click();await expect(page.getByRole('button',{name:'Resume agents',exact:true})).toBeEnabled();
-  await page.getByRole('button',{name:'Resume agents',exact:true}).click();
-  await page.getByRole('button',{name:'Simulate payment',exact:true}).click();await expect(page.getByText('Simulated payment recorded',{exact:true})).toBeVisible();
-  await send('accountant','What payment and receipt status is recorded now?',/Jordan, the AI demo accountant.*snapshot v3.*one simulated KRW 144,000 receipt/);
-  await send('client','How does Marmot make this conversation private?',/Riley, the AI demo client.*MLS.*ciphertext.*AI provider/i);
-  metrics.journeySeconds=(Date.now()-started)/1000;console.log('Actual native+Hermes timing '+JSON.stringify(metrics));if(process.env.QUIET_LEDGER_TEAM_METRICS)await writeFile(process.env.QUIET_LEDGER_TEAM_METRICS,JSON.stringify(metrics,null,2)+'\n');expect(metrics.journeySeconds).toBeLessThan(180);
-  const count=await history.locator('li').count();expect(count).toBe(10);await page.evaluate(()=>window.scrollTo(0,0));if(process.env.QUIET_LEDGER_TEAM_SCREENSHOT)await page.screenshot({path:process.env.QUIET_LEDGER_TEAM_SCREENSHOT,fullPage:true});await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);if(process.env.QUIET_LEDGER_TEAM_MOBILE_SCREENSHOT)await page.screenshot({path:process.env.QUIET_LEDGER_TEAM_MOBILE_SCREENSHOT,fullPage:true});await page.setViewportSize({width:1280,height:900});
-  await page.reload();await page.getByRole('button',{name:'Start the demo team',exact:true}).click();await expect(page.getByText('All three participants connected',{exact:true})).toBeVisible({timeout:60000});await expect(history.locator('li')).toHaveCount(count);
-  await page.getByRole('button',{name:'Refresh messages',exact:true}).click();await expect(history.locator('li')).toHaveCount(count);
-  await page.getByRole('button',{name:'Reset team',exact:true}).click();await expect(page.getByRole('button',{name:'Start the demo team',exact:true})).toBeEnabled();await expect(history.locator('li')).toHaveCount(0);
+test('actual browser, native MDK and Hermes keep direct conversations and ledger authority separate',async({page})=>{
+ test.skip(!process.env.QUIET_LEDGER_TEAM_URL,'Requires separately configured actual native MDK and Hermes.');
+ const started=Date.now(),metrics:{prepareSeconds?:number;replySeconds:number[];journeySeconds?:number}={replySeconds:[]};
+ await enter(page);await page.goto('/demo/new');
+ await page.getByLabel('Invoice title',{exact:true}).fill('Fictional Marmot workshop recording');await page.getByLabel('Invoice currency',{exact:true}).selectOption('KRW');await page.getByLabel('Item 1 unit price',{exact:true}).fill('150000');await page.getByLabel('Discount (%)',{exact:true}).fill('10');await page.getByLabel('Premium (%)',{exact:true}).fill('6');await page.getByLabel('Issue date',{exact:true}).fill('2026-11-05');await page.getByLabel('Due date',{exact:true}).fill('2026-11-12');await page.getByRole('button',{name:'Create demo invoice',exact:true}).click();await expect(page).toHaveURL(/\/demo\/team$/);
+ const preparationStarted=Date.now();await expect(page.getByRole('tab',{name:'Riley',exact:true})).toHaveAttribute('aria-selected','true');await page.getByRole('button',{name:'Start conversation',exact:true}).click();await expect(page.getByText('You and Riley connected',{exact:true})).toBeVisible({timeout:90000});metrics.prepareSeconds=(Date.now()-preparationStarted)/1000;
+ const history=historyFor(page);
+ async function send(text:string,reply:RegExp){const sent=Date.now(),count=await history.locator('li').count();await sendMessage(page,text);await expect(history.locator('li')).toHaveCount(count+2,{timeout:60000});await expect(history.locator('li').last()).toContainText(reply);await expect(history.locator('.team-message-sent').last().locator('p')).toHaveText(text.trim());await expect(history.locator('li').last()).not.toContainText(/Riley, the AI demo client|Jordan, the AI demo accountant|snapshot v\d/i);metrics.replySeconds.push((Date.now()-sent)/1000);}
+ await send('What does your company do?',/workshop|walkthrough|recording/i);
+ await send('I edit videos. How could that help with the workshops you just described?',/video|edit|record|caption|walkthrough/i);
+ await expect(history.locator('li')).toHaveCount(4);
+ await openRoom(page,'Jordan');await expect(history.locator('li')).toHaveCount(0);
+ await send('Please check the total and tax on this invoice.',/150,000[\s\S]*15,000[\s\S]*9,000[\s\S]*144,000/);
+ await send('I paid. What payment status is recorded in the ledger?',/no payment|unpaid|open/i);await expect(page.getByText('Awaiting payment',{exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Pause agents',exact:true}).click();await expect(page.getByRole('button',{name:'Resume agents',exact:true})).toBeEnabled();await page.getByRole('button',{name:'Resume agents',exact:true}).click();await page.getByRole('button',{name:'Simulate payment',exact:true}).click();await expect(page.getByText('Simulated payment recorded',{exact:true})).toBeVisible();await send('What payment and receipt status is recorded now?',/simulated[\s\S]*144,000|144,000[\s\S]*simulat/i);
+ await openRoom(page,'Group');await expect(history.locator('li')).toHaveCount(0);await sendMessage(page,'Hello, everyone. What is your role in the workshop team?');await expect(history.locator('li')).toHaveCount(3,{timeout:60000});await expect(history.locator('.team-message-received strong').filter({hasText:/^Riley$/})).toHaveCount(1);await expect(history.locator('.team-message-received strong').filter({hasText:/^Jordan$/})).toHaveCount(1);
+ await openRoom(page,'Riley');await expect(history.locator('li')).toHaveCount(4);await expect(history.getByText('Please check the total and tax on this invoice.',{exact:true})).toHaveCount(0);
+ await page.reload();await page.getByRole('button',{name:'Start conversation',exact:true}).click();await expect(page.getByText('You and Riley connected',{exact:true})).toBeVisible({timeout:90000});await expect(history.locator('li')).toHaveCount(4);await page.getByRole('button',{name:'Refresh messages',exact:true}).click();await expect(history.locator('li')).toHaveCount(4);
+ metrics.journeySeconds=(Date.now()-started)/1000;console.log('Actual native+Hermes conversational timing '+JSON.stringify(metrics));if(process.env.QUIET_LEDGER_TEAM_METRICS)await writeFile(process.env.QUIET_LEDGER_TEAM_METRICS,JSON.stringify(metrics,null,2)+'\n');
+ await page.evaluate(()=>window.scrollTo(0,0));if(process.env.QUIET_LEDGER_TEAM_SCREENSHOT)await page.screenshot({path:process.env.QUIET_LEDGER_TEAM_SCREENSHOT,fullPage:true});await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);if(process.env.QUIET_LEDGER_TEAM_MOBILE_SCREENSHOT)await page.screenshot({path:process.env.QUIET_LEDGER_TEAM_MOBILE_SCREENSHOT,fullPage:true});
+ await page.getByRole('button',{name:'Reset team',exact:true}).click();await expect(page.getByRole('button',{name:'Start conversation',exact:true})).toBeEnabled();await expect(history.locator('li')).toHaveCount(0);
+});
+test('conversational browser defaults to Riley and keeps direct rooms and explicit group separate',async({page,baseURL})=>{
+ test.skip(baseURL!=='http://localhost:4352','Synthetic browser fixture only.');
+ await enter(page);await page.goto('/demo/team');
+ const history=page.getByRole('log',{name:'Demo team decrypted messages'});
+ const tab=(name:string)=>page.getByRole('tab',{name,exact:true});
+ await expect(tab('Riley')).toHaveAttribute('aria-selected','true');
+ await expect(page.getByRole('heading',{name:'You and Riley',exact:true})).toBeVisible();
+ await expect(page.getByRole('combobox',{name:'Talk to',exact:true})).toHaveCount(0);
+ await page.getByRole('button',{name:'Start conversation',exact:true}).click();
+ await expect(page.getByText('You and Riley connected',{exact:true})).toBeVisible();
+ const send=async(text:string)=>{await page.getByLabel('Message the demo team',{exact:true}).fill(text);await page.getByRole('button',{name:'Send message',exact:true}).click();};
+ await send('  What does your company do?  ');
+ await expect(history.getByText('What does your company do?',{exact:true})).toBeVisible();
+ await expect(history.getByText('Riley: What does your company do?',{exact:true})).toHaveCount(0);
+ await expect(history.getByText(/We run fictional community workshops/)).toBeVisible();
+ await tab('Jordan').click();await expect(page.getByText('You and Jordan connected',{exact:true})).toBeVisible();await expect(history.locator('li')).toHaveCount(0);
+ await send('Who handles the company books?');await expect(history.getByText(/I handle the books/)).toBeVisible();
+ await tab('Group').click();await expect(page.getByRole('heading',{name:'You, Riley and Jordan',exact:true})).toBeVisible();await expect(page.getByText('You, Riley and Jordan connected',{exact:true})).toBeVisible();await expect(history.locator('li')).toHaveCount(0);
+ await send('Hello, everyone.');await expect(history.getByText(/We run fictional community workshops/)).toBeVisible();await expect(page.getByRole('button',{name:'Send message',exact:true})).toBeDisabled();await expect(page.getByText('Jordan is reviewing…',{exact:true})).toBeVisible();await expect(history.getByText(/I handle the books/)).toBeVisible();await expect(history.locator('li')).toHaveCount(3);
+ await send('@Riley Could you explain the workshops?');await expect(history.locator('li')).toHaveCount(5);await expect(history.locator('.team-message-sent').last().locator('p')).toHaveText('@Riley Could you explain the workshops?');await expect(page.getByRole('button',{name:'About the company',exact:true})).toBeEnabled();
+ await tab('Riley').click();await expect(page.getByText('You and Riley connected',{exact:true})).toBeVisible();await expect(history.locator('li')).toHaveCount(2);await expect(history.getByText('What does your company do?',{exact:true})).toBeVisible();await expect(history.getByText('Hello, everyone.',{exact:true})).toHaveCount(0);
+ await page.reload();await expect(tab('Riley')).toHaveAttribute('aria-selected','true');await page.getByRole('button',{name:'Start conversation',exact:true}).click();await expect(page.getByText('You and Riley connected',{exact:true})).toBeVisible();await expect(history.locator('li')).toHaveCount(2);
+ await tab('Jordan').click();await expect(page.getByText('You and Jordan connected',{exact:true})).toBeVisible();await expect(history.getByText('Who handles the company books?',{exact:true})).toBeVisible();await expect(history.getByText('What does your company do?',{exact:true})).toHaveCount(0);
+ const observations=await page.request.get('/fixture/observations').then(r=>r.json());expect(Object.keys(observations.rooms)).toHaveLength(3);expect(observations.rosters.client).toHaveLength(2);expect(observations.rosters.accountant).toHaveLength(2);expect(observations.rosters.group).toHaveLength(3);expect(observations.observed.filter((row:{channel:string})=>row.channel==='client').map((row:{text:string})=>row.text)).toEqual(['What does your company do?']);
+ await page.getByRole('button',{name:'Pause agents',exact:true}).click();await expect(page.getByRole('button',{name:'Resume agents',exact:true})).toBeEnabled();await tab('Group').click();await expect(page.getByText('Agents paused for all conversations',{exact:true})).toBeVisible();await page.getByRole('button',{name:'Resume agents',exact:true}).click();await expect(page.getByText('You, Riley and Jordan connected',{exact:true})).toBeVisible();
+ await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);if(process.env.QUIET_LEDGER_TEAM_MOBILE_SCREENSHOT)await page.screenshot({path:process.env.QUIET_LEDGER_TEAM_MOBILE_SCREENSHOT,fullPage:true});
+ await page.getByRole('button',{name:'Reset team',exact:true}).click();await expect(page.getByRole('button',{name:'Start conversation',exact:true})).toBeEnabled();await expect(history.locator('li')).toHaveCount(0);
 });
 
+test('conversational browser releases stalled and failed turns without accepting an earlier reply for a new question',async({page,baseURL})=>{
+ test.skip(baseURL!=='http://localhost:4352','Synthetic browser fixture only.');
+ await enter(page);await page.goto('/demo/team');await page.getByRole('button',{name:'Start conversation',exact:true}).click();await expect(page.getByText('You and Riley connected',{exact:true})).toBeVisible();
+ await page.request.post('/fixture/mode',{data:{mode:'stall'}});await page.clock.install();
+ await sendMessage(page,'A question that will time out.');await expect(page.getByText('Riley is reviewing…',{exact:true})).toBeVisible();await page.clock.fastForward(45001);await expect(page.getByRole('alert')).toContainText('not replied within 45 seconds');await expect(page.getByRole('button',{name:'About the company',exact:true})).toBeEnabled();
+ await sendMessage(page,'A new question after the timeout.');await expect(page.getByText('Riley is reviewing…',{exact:true})).toBeVisible();await expect.poll(async()=>{const data=await page.request.get('/fixture/observations').then(r=>r.json());return data.observed.length;}).toBe(2);
+ await page.request.post('/fixture/reply',{data:{channel:'client',role:'client',unreferenced:true}});await expect(historyFor(page).getByText('An earlier reply without a reference.',{exact:true})).toBeVisible();await expect(page.getByText('Riley is reviewing…',{exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'About the company',exact:true})).toBeDisabled();
+ await page.request.post('/fixture/reply',{data:{channel:'client',role:'client',previous:true}});await expect(historyFor(page).getByText('A delayed earlier reply.',{exact:true})).toBeVisible();await expect(page.getByText('Riley is reviewing…',{exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'About the company',exact:true})).toBeDisabled();
+ await page.request.post('/fixture/reply',{data:{channel:'client',role:'client'}});await expect(historyFor(page).getByText('A reply to the current question.',{exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'About the company',exact:true})).toBeEnabled();
+ await page.request.post('/fixture/mode',{data:{mode:'stall',issue:'A fictional model turn could not complete.'}});await sendMessage(page,'Please check the wording.');await expect(page.getByRole('alert')).toContainText('A fictional model turn could not complete.');await expect(page.getByRole('button',{name:'About the company',exact:true})).toBeEnabled();
+ await page.route('**/api/hackathon-demo/agents',async route=>{if(route.request().method()!=='GET')return route.continue();return route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'Fictional delivery check unavailable.'})});});await sendMessage(page,'Please check delivery.');await expect(page.getByRole('alert')).toContainText('Fictional delivery check unavailable.');await expect(page.getByRole('button',{name:'About the company',exact:true})).toBeEnabled();await page.unrouteAll();
+ await page.route('**/api/hackathon-demo/agents',async route=>{if(route.request().method()!=='GET')return route.continue();const response=await route.fetch();const data=await response.json();await route.fulfill({response,json:{...data,issue:undefined,roundsRemaining:0}});});await page.getByRole('button',{name:'Refresh messages',exact:true}).click();await expect(page.getByText('This demo’s reply allowance is used. Choose Reset team to start a fresh conversation.',{exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'About the company',exact:true})).toBeDisabled();await expect(page.getByRole('button',{name:'Reset team',exact:true})).toBeEnabled();await page.clock.resume();
+});
 
-test('a stalled reply releases the composer and a worker issue releases quick prompts',async({page})=>{
- test.skip(!process.env.QUIET_LEDGER_TEAM_URL,'Requires actual native participants for browser state verification.');
- await enter(page);await page.getByRole('link',{name:'Talk to the demo team',exact:true}).click();
- await page.getByRole('button',{name:'Start the demo team',exact:true}).click();await expect(page.getByText('All three participants connected',{exact:true})).toBeVisible({timeout:90000});
- await page.clock.install();
- await page.getByLabel('Message the demo team',{exact:true}).fill('Please confirm the scope of this fictional invoice.');
- await page.getByRole('button',{name:'Send message',exact:true}).click();
- await expect(page.getByText('Riley is reviewing…',{exact:true})).toBeVisible();
- await page.clock.fastForward(45001);
- await expect(page.getByRole('alert')).toContainText('not replied within 45 seconds');
- await expect(page.getByRole('button',{name:'Confirm scope · Riley',exact:true})).toBeEnabled();
- // A sanitized runtime failure must release waiting state without discarding its encrypted outbox.
- let mode:'issue'|'failure'|'rounds'='issue';
- await page.route('**/api/hackathon-demo/agents',async route=>{if(route.request().method()!=='GET')return route.continue();if(mode==='failure')return route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'Fictional delivery check unavailable.'})});const response=await route.fetch();const team=await response.json();await route.fulfill({response,json:{...team,...(mode==='rounds'?{roundsRemaining:0}:{issue:'A demo AI turn could not complete. Try another message or reset the team.'})}});});
- await page.getByLabel('Message the demo team',{exact:true}).fill('Please confirm the current invoice wording.');await page.getByRole('button',{name:'Send message',exact:true}).click();
- await expect(page.getByRole('alert')).toContainText('A demo AI turn could not complete');
- await expect(page.getByRole('button',{name:'Confirm scope · Riley',exact:true})).toBeEnabled();
- mode='failure';await page.getByLabel('Message the demo team',{exact:true}).fill('Please confirm the fictional delivery note.');await page.getByRole('button',{name:'Send message',exact:true}).click();await expect(page.getByRole('alert')).toContainText('Fictional delivery check unavailable.');await expect(page.getByRole('button',{name:'Confirm scope · Riley',exact:true})).toBeEnabled();
- mode='rounds';await page.getByRole('button',{name:'Refresh messages',exact:true}).click();await expect(page.getByText('This demo’s reply allowance is used. Choose Reset team to start a fresh conversation.',{exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Confirm scope · Riley',exact:true})).toBeDisabled();await expect(page.getByRole('button',{name:'Reset team',exact:true})).toBeEnabled();
- await page.clock.resume();
+test('conversational browser waits only for explicitly mentioned group members',async({page,baseURL})=>{
+ test.skip(baseURL!=='http://localhost:4352','Synthetic browser fixture only.');
+ await enter(page);await page.goto('/demo/team');await page.getByRole('tab',{name:'Group',exact:true}).click();await page.getByRole('button',{name:'Start conversation',exact:true}).click();await expect(page.getByText('You, Riley and Jordan connected',{exact:true})).toBeVisible();await page.request.post('/fixture/mode',{data:{mode:'stall'}});
+ const cases=[{text:'@Jordan Please review this.',role:'accountant',name:'Jordan'},{text:'Jordan: Please review this.',role:'accountant',name:'Jordan'},{text:'@Riley Please review this.',role:'client',name:'Riley'},{text:'Riley: Please review this.',role:'client',name:'Riley'}];
+ for(const {text,role,name}of cases){await sendMessage(page,text);await expect(page.getByText(name+' is reviewing…',{exact:true})).toBeVisible();await expect.poll(async()=>{const data=await page.request.get('/fixture/observations').then(r=>r.json());return data.observed.filter((row:{text:string})=>row.text===text).length;}).toBe(2);await page.request.post('/fixture/reply',{data:{channel:'group',role}});await expect(page.getByRole('button',{name:'About the company',exact:true})).toBeEnabled();await expect(historyFor(page).locator('.team-message-sent').last().locator('p')).toHaveText(text);}
+ await sendMessage(page,'@Riley and @Jordan, please both review this.');await expect(page.getByText('Riley and Jordan are reviewing…',{exact:true})).toBeVisible();await expect.poll(async()=>{const data=await page.request.get('/fixture/observations').then(r=>r.json());return data.observed.filter((row:{text:string})=>row.text==='@Riley and @Jordan, please both review this.').length;}).toBe(2);await page.request.post('/fixture/reply',{data:{channel:'group',role:'client'}});await expect(page.getByText('Jordan is reviewing…',{exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'About the company',exact:true})).toBeDisabled();await page.request.post('/fixture/reply',{data:{channel:'group',role:'accountant'}});await expect(page.getByRole('button',{name:'About the company',exact:true})).toBeEnabled();
+});
+
+test('conversational browser disconnects a direct room when an authenticated commit expands its roster',async({page,baseURL})=>{
+ test.skip(baseURL!=='http://localhost:4352','Synthetic browser fixture only.');
+ await enter(page);await page.goto('/demo/team');await page.getByRole('button',{name:'Start conversation',exact:true}).click();await expect(page.getByText('You and Riley connected',{exact:true})).toBeVisible();
+ await page.evaluate(async(harnessUrl)=>{const browserModule='/marmot-engine.ts',engineModule='/demo-agent-engine.ts';const {createMarmotBrowserStore}=await import(browserModule);const {createDemoWebSocketNetwork}=await import(engineModule);const {injectDemoRoomMember}=await import(harnessUrl);const team=await fetch('/api/hackathon-demo/agents').then(response=>response.json());const storage=await createMarmotBrowserStore(),relayUrl=location.origin.replace(/^http/,'ws')+team.relayPath,network=createDemoWebSocketNetwork(relayUrl);try{await injectDemoRoomMember({storage,network,relayUrl,groupId:team.rooms.client.groupId,memberPubkey:team.members.find((member:{role:string})=>member.role==='accountant').pubkey});}finally{network.close();storage.close();}},'/@fs'+resolve(import.meta.dirname,'../demo-conversation-roster.ts'));
+ await expect(page.getByRole('alert')).toContainText(/membership changed|roster/i);await expect(page.getByText('You and Riley connected',{exact:true})).toHaveCount(0);await expect(page.getByText('Conversation disconnected',{exact:true})).toBeVisible();await expect(page.getByText(/Two members · only you and Riley belong to this room/)).toHaveCount(0);await expect(page.getByRole('button',{name:'Send message',exact:true})).toBeDisabled();await expect(page.getByLabel('Message the demo team',{exact:true})).toBeDisabled();
 });

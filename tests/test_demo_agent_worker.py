@@ -21,6 +21,9 @@ def case():
             'total': 12500, 'status': 'open', 'settlementMode': 'simulation',
             'receiptRecorded': False, 'version': 1, 'asOf': '2026-11-05T12:00:00.000Z'}
 
+def answer(intent='conversation', reply='We run hands-on private-messaging workshops. Would a filmed walkthrough suit your work?'):
+    return {'intent': intent, 'reply': reply}
+
 def payload(role='client', request='fictional-request-1'):
     return {'role': role, 'text': 'What is this fictional workshop for?',
             'case': case(), 'requestId': request}
@@ -33,14 +36,14 @@ class WorkerContract(unittest.TestCase):
     def test_authentication_precedes_parsing_and_inference(self):
         calls = []
         service = self.w.InferenceService(token='t'*43, model='fixture-model',
-                                         infer=lambda p: calls.append(p) or 'explain-scope')
+                                         infer=lambda p: calls.append(p) or answer('explain-scope'))
         for header in [None, 'Bearer wrong', 'Basic '+('t'*43), 'Bearer '+('t'*43)+' ']:
             with self.assertRaises(self.w.ServiceError) as caught:
                 service.handle(header, {'malformed': True})
             self.assertEqual(caught.exception.status, 401)
         self.assertEqual(calls, [])
         self.assertEqual(service.handle('Bearer '+('t'*43), payload()),
-                         {'runtime': 'hermes', 'model': 'fixture-model', 'intent': 'explain-scope'})
+                         {'runtime': 'hermes', 'model': 'fixture-model', 'intent': 'explain-scope', 'reply': answer()['reply']})
 
     def test_strict_fictional_case_and_shapes(self):
         self.assertEqual(self.w.validate_request(payload())['case'], case())
@@ -65,7 +68,7 @@ class WorkerContract(unittest.TestCase):
 
     def test_idempotency_is_bound_to_entire_request_and_role(self):
         calls = []
-        service = self.w.InferenceService(token='t'*43, model='fixture', infer=lambda p: calls.append(p) or 'check-total')
+        service = self.w.InferenceService(token='t'*43, model='fixture', infer=lambda p: calls.append(p) or answer('check-total'))
         first = service.handle('Bearer '+('t'*43), payload())
         self.assertEqual(service.handle('Bearer '+('t'*43), payload()), first)
         self.assertEqual(len(calls), 1)
@@ -87,7 +90,7 @@ class WorkerContract(unittest.TestCase):
         def infer(p):
             calls[0] += 1
             if calls[0] == 1: raise RuntimeError('private-provider-token-not-for-response')
-            return 'request-review'
+            return answer('request-review')
         service = self.w.InferenceService(token='t'*43, model='fixture', infer=infer)
         with self.assertRaises(self.w.ServiceError) as caught: service.handle('Bearer '+('t'*43), payload())
         self.assertNotIn('private-provider-token', str(caught.exception))
@@ -95,7 +98,7 @@ class WorkerContract(unittest.TestCase):
 
     def test_concurrency_limit_and_bounded_cache_rate(self):
         entered = threading.Event(); release = threading.Event()
-        def infer(p): entered.set(); release.wait(2); return 'explain-scope'
+        def infer(p): entered.set(); release.wait(2); return answer('explain-scope')
         service = self.w.InferenceService(token='t'*43, model='fixture', infer=infer, requests_per_minute=2, max_cache=2)
         thread = threading.Thread(target=lambda: service.handle('Bearer '+('t'*43), payload()))
         thread.start(); self.assertTrue(entered.wait(1))
@@ -107,6 +110,56 @@ class WorkerContract(unittest.TestCase):
         with self.assertRaises(self.w.ServiceError) as e: service.handle('Bearer '+('t'*43), payload(request='third-request'))
         self.assertEqual(e.exception.status, 429)
         self.assertLessEqual(service.cache_size, 2)
+
+    def test_history_is_bounded_detached_and_in_the_request_fingerprint(self):
+        p = payload(); p['history'] = [{'speaker':'human','text':'I make captioned clips.'},
+                                     {'speaker':'client','text':'Workshop walkthroughs would help.'}]
+        self.assertEqual(self.w.validate_request(p)['history'], p['history'])
+        admitted = self.w.validate_request(p);p['history'][0]['text']='changed'
+        self.assertNotEqual(admitted['history'][0]['text'],p['history'][0]['text'])
+        for history in [None, 'all rooms', [{}], [{'speaker':'owner','text':'private'}],
+                        [{'speaker':'human','text':'x'*1001}], [{'speaker':'human','text':'x'}]*9,
+                        [{'speaker':'human','text':'é'*1000}]*4,
+                        [{'speaker':'human','text':'x','extra':'private'}],
+                        [{'speaker':'human','text':'\x00'}]]:
+            bad=payload();bad['history']=history
+            with self.assertRaises(self.w.ServiceError): self.w.validate_request(bad)
+        service=self.w.InferenceService(token='t'*43,model='fixture',infer=lambda p:answer())
+        service.handle('Bearer '+('t'*43),admitted)
+        with self.assertRaises(self.w.ServiceError) as e:service.handle('Bearer '+('t'*43),p)
+        self.assertEqual(e.exception.status,409)
+
+    def test_conversation_reply_is_required_short_and_has_no_financial_authority(self):
+        good=answer(reply='We run private-messaging workshops. Captioned clips would help people follow along. What do you like filming?')
+        service=self.w.InferenceService(token='t'*43,model='fixture',infer=lambda p:good)
+        self.assertEqual(service.handle('Bearer '+('t'*43),payload())['reply'],good['reply'])
+        for result in ['conversation', {'intent':'conversation'}, answer(reply='x'*1001),
+                       answer(reply='Your payment arrived.'),answer(reply='The transfer cleared.'),
+                       answer(reply='We charge CAD 125.00.'),answer(reply='Riley: Hello.'),
+                       answer(reply='I am an AI demo client.'),answer(reply='One? Two?')]:
+            service=self.w.InferenceService(token='t'*43,model='fixture',infer=lambda p:result)
+            with self.assertRaises(self.w.ServiceError) as e:service.handle('Bearer '+('t'*43),payload())
+            self.assertEqual(e.exception.status,502)
+
+    def test_scope_proposals_and_colleague_mentions_are_allowed(self):
+        for reply in ['Riley runs the workshops; I help keep the scope clear.',
+                      'I would start with one clear walkthrough, then try two captioned clips.']:
+            self.assertEqual(self.w.validate_reply(answer(reply=reply)),answer(reply=reply))
+
+    def test_creative_verbs_are_allowed_but_financial_record_claims_are_not(self):
+        for reply in ["I'm Riley, the workshop producer here at Marmot Field Lab.",'A screen-recorded walkthrough would help people follow the steps.',
+                      'We can try a changed approach after the first edit.',
+                      'The approved scope gives us something concrete to work from.',
+                      'I received your idea; a captioned walkthrough sounds useful.',
+                      'An authorized participant can join the workshop chat.',
+                      'We can update the caption style after review.']:
+            self.assertEqual(self.w.validate_reply(answer(reply=reply)),answer(reply=reply))
+        for reply in ['I recorded the invoice.','The invoice was approved.','I changed the ledger.',
+                      'The ledger has been updated.','I received the bill.',
+                      'I marked the invoice complete.','Your account is updated.',
+                      'Approved invoices are ready.','The invoice status is open.',
+                      'The bill is closed.','I saved the records.',"I've changed it."]:
+            with self.assertRaises(ValueError):self.w.validate_reply(answer(reply=reply))
 
     def test_private_files_refuse_symlink_world_readable_or_vault_paths(self):
         with tempfile.TemporaryDirectory(prefix='ql-worker-keys-') as folder:
@@ -140,7 +193,7 @@ class WorkerContract(unittest.TestCase):
 
     def test_http_surface_limits_and_authenticated_health(self):
         import urllib.request, urllib.error
-        service = self.w.InferenceService(token='t'*43, model='fixture', infer=lambda p: 'check-total')
+        service = self.w.InferenceService(token='t'*43, model='fixture', infer=lambda p: answer('check-total'))
         server = self.w.make_server('127.0.0.1', 0, service)
         thread = threading.Thread(target=server.serve_forever); thread.start()
         base='http://127.0.0.1:'+str(server.server_address[1])
@@ -158,12 +211,14 @@ class WorkerContract(unittest.TestCase):
 
     def test_actual_hermes_constructor_has_empty_tools_and_no_personal_context(self):
         calls = {}; closed = []
+        request=payload();request['text']="What's it exactly that you're company does and how can I help you achieve this?"
+        request['history']=[{'speaker':'human','text':'I film practical tutorials.'},{'speaker':'client','text':'Captioned workshop walkthroughs would help.'}]
         class Agent:
             tools = []
             def __init__(self, **kwargs): calls['init'] = kwargs
             def run_conversation(self, message, **kwargs):
                 calls['message'] = message; calls['turn'] = kwargs
-                return {'final_response': '{"intent":"explain-recorded-status"}'}
+                return {'final_response': json.dumps(answer('explain-recorded-status'))}
             def close(self): closed.append(True)
         with tempfile.TemporaryDirectory(prefix='ql-hermes-fixture-') as folder:
             root=Path(folder); (root/'run_agent.py').touch()
@@ -172,14 +227,15 @@ class WorkerContract(unittest.TestCase):
             import os
             original=os.environ.get('HERMES_HOME')
             try:
-                intent=self.w.run_hermes_turn(payload(),source_root=root,credential_file=str(secret),
+                intent=self.w.run_hermes_turn(request,source_root=root,credential_file=str(secret),
                     model='fixture',base_url='https://model.invalid/v1',home=home,agent_factory=Agent)
             finally:
                 if original is None: os.environ.pop('HERMES_HOME',None)
                 else: os.environ['HERMES_HOME']=original
-        self.assertEqual(intent,'explain-recorded-status');self.assertEqual(closed,[True])
+        self.assertEqual(intent,answer('explain-recorded-status'));self.assertEqual(closed,[True])
         options=calls['init']
         self.assertEqual(options['enabled_toolsets'],[])
+        self.assertEqual(options['request_overrides'],{'response_format':{'type':'json_object'}})
         for option in ('skip_context_files','skip_memory','skip_background_review'):
             self.assertIs(options[option],True)
         for option in ('load_soul_identity','save_trajectories','verbose_logging'):
@@ -188,6 +244,10 @@ class WorkerContract(unittest.TestCase):
         self.assertLess(options['run_budget_seconds'],30)
         self.assertIsNone(options['fallback_model']);self.assertIsNone(options['session_db'])
         self.assertEqual(calls['turn']['conversation_history'],[])
+        self.assertIn('I film practical tutorials.',calls['message'])
+        self.assertIn('hands-on',calls['turn']['system_message'])
+        self.assertIn(request['text'],calls['message'])
+        self.assertGreaterEqual(options['max_tokens'],384)
         self.assertNotIn('fictional-fixture-credential',calls['turn']['system_message'])
         self.assertNotIn('fictional-fixture-credential',calls['message'])
 
@@ -217,6 +277,20 @@ class WorkerContract(unittest.TestCase):
             finally:
                 if original is None:os.environ.pop('HERMES_HOME',None)
                 else:os.environ['HERMES_HOME']=original
+
+    def test_child_success_returns_composed_reply_with_bounded_unicode_history(self):
+        with tempfile.TemporaryDirectory(prefix='ql-hermes-success-') as folder:
+            root=Path(folder);root.chmod(0o700)
+            state=root/'state';state.mkdir(mode=0o700)
+            key=root/'key';key.write_text('fictional-fixture-key');key.chmod(0o600)
+            interpreter=root/'fixture-python'
+            interpreter.write_text('#!/usr/bin/python3\nimport json,sys\nrequest=json.load(sys.stdin)\nassert len(request["history"])==3\nprint(json.dumps({"intent":"conversation","reply":"Captioned walkthroughs would help our workshops."}))\n')
+            interpreter.chmod(0o700)
+            inference=self.w.ChildInference(source_root=root,credential_file=str(key),model='fixture',
+                base_url='https://model.invalid/v1',state_dir=str(state),python=str(interpreter))
+            p=payload();p['history']=[{'speaker':'human','text':'é'*1000}]*3
+            self.assertEqual(inference(p),answer(reply='Captioned walkthroughs would help our workshops.'))
+            self.assertEqual(list(state.iterdir()),[])
 
     def test_child_deadline_kills_inference_and_removes_fresh_home(self):
         import time, os

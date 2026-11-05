@@ -52,7 +52,9 @@ and native Marmot runtime; no model service is needed for ordinary invoicing.
 - Private passkey/Nostr accounts, encrypted record payloads, scoped API and MCP.
 - [Reusable client invoice templates](docs/INVOICES.md), date pickers, CAD/USD/KRW/EUR/GBP,
   discounts, premiums, accepted-method controls, checkout links, records and exports.
-- Optional per-invoice Marmot/MLS messaging and a fictional client/accountant demo.
+- Optional per-invoice Marmot/MLS messaging and conversational fictional clients.
+  The demo defaults to a two-member Riley chat, with a separate Jordan chat and
+  an explicit three-member group. See [the demo guide](docs/DEMO-TEAM.md).
 - Consistent encrypted database backups and a separate cold native-key backup.
 
 The operator holding the storage key can decrypt financial records. Agents and

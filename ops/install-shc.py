@@ -11,7 +11,7 @@ APP_BASE_REVISION='c61f97464ef26b03'
 HERMES_IMAGE='quiet-ledger-hermes-demo:0.22.5'
 # The target Docker load uses the immutable config digest; the local containerd
 # descriptor differs. Every rootfs layer and defined Config field was verified equal.
-HERMES_IMAGE_ID='sha256:a71177dba1178352058b08cdcbd90982b6c5b97ea3075ab28d62cabe33907701'
+HERMES_IMAGE_ID='sha256:5b0c9eac2543df3ac85d247d8ef2aa5396170a79cda3b4a2b62da2e74bf5a042'
 WN_BINARY_SHA256='08c346d09bbc0a68d5f47c61f393a91245fb82cf40ea17898b2ecdd189d12964'
 RUNTIME_UID=1000
 

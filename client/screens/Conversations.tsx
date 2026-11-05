@@ -96,7 +96,7 @@ export function HackathonDemoPage(){
   function changeTab(event:KeyboardEvent<HTMLButtonElement>){if(['ArrowLeft','ArrowRight','Home','End'].includes(event.key)){event.preventDefault();const next=event.key==='Home'?'merchant':event.key==='End'?'customer':tab==='merchant'?'customer':'merchant';setTab(next);tabButtons.current[next]?.focus();}}
   const paid=view?.invoice.status==='paid';
   return <div className="conversations-page marmot-demo"><PageHeading eyebrow="QUIET LEDGER × MARMOT" title="A private conversation. A clear paper trail." description="Walk through a fictional invoice with two independent messaging identities. The conversation uses real Marmot encryption; the payment is simulated."/>
-    <p className="demo-invoice-actions"><Link to="/demo/new" className="button secondary">Create a demo invoice<FileText size={16}/></Link> <Link to="/demo/team" className="button primary">Talk to the demo team<MessageCircle size={16}/></Link></p>
+    <p className="demo-invoice-actions"><Link to="/demo/new" className="button secondary">Create a demo invoice<FileText size={16}/></Link> <Link to="/demo/team" className="button primary">Meet Riley and Jordan<MessageCircle size={16}/></Link></p>
     <div className="conversation-demo-banner"><span><ShieldCheck size={19}/>Fictional demo · no real money moves</span><Badge tone="ink">Real Marmot / MLS messaging</Badge></div>
     {error?<ErrorMessage message={error} onRetry={!view?()=>void load():undefined}/>:null}
     {loading&&!view?<Loading label="Opening the fictional demo…"/>:null}

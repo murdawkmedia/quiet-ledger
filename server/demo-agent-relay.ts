@@ -3,7 +3,7 @@ import type {Server,IncomingMessage} from 'node:http';
 import {WebSocketServer,WebSocket} from 'ws';
 import {verifyEvent,type Event} from 'nostr-tools';
 import type {Store} from './store.js';
-import type {DemoTeamLease} from '../shared/demo-agents.js';
+import {demoRooms,type DemoTeamLease} from '../shared/demo-agents.js';
 type Filter={ids?:string[];authors?:string[];kinds?:number[];since?:number;until?:number;limit?:number;[key:string]:unknown};
 interface Options {store:Store;now:()=>Date;getLease:()=>DemoTeamLease|undefined;publicOrigin:string}
 export interface DemoRelay {attach(server:Server,options:{proxySecret?:string;standalone?:boolean}):void;close():Promise<void>}
@@ -18,7 +18,7 @@ export function createDemoRelay({store,now,getLease,publicOrigin}:Options):DemoR
  const wss=new WebSocketServer({noServer:true,maxPayload:32768,perMessageDeflate:false});const bindings=new Map<WebSocket,{id:string;generation:number}>();const subscriptions=new Map<WebSocket,Map<string,Filter[]>>();const peers=new Map<string,{count:number;frames:number;window:number}>();const attached=new Map<Server,(req:IncomingMessage,socket:any,head:Buffer)=>void>();let closed=false;
  const validLease=()=>{const lease=getLease();return lease&&Date.parse(lease.expiresAt)>now().getTime()&&!['expired','offline','idle'].includes(lease.state)?lease:undefined;};
  function permitted(event:Event,lease:DemoTeamLease){const known=[lease.humanPubkey,...lease.members.map(m=>m.pubkey)];if(Object.keys(event).some(key=>!['id','pubkey','sig','kind','created_at','content','tags'].includes(key))||([30443,1059,445].includes(event.kind)&&!/^[-A-Za-z0-9+/_]+={0,2}$/.test(event.content))||!kinds.has(event.kind)||event.content.length>24576||event.tags.length>64||event.tags.some(t=>t.length>64||t.some(v=>v.length>1024)))return false;
-  if(event.kind===445)return Boolean(lease.nostrGroupId&&tag(event,'h').length===1&&tag(event,'h')[0]===lease.nostrGroupId);
+  if(event.kind===445)return Boolean(tag(event,'h').length===1&&Object.values(demoRooms(lease)).some(room=>room?.nostrGroupId===tag(event,'h')[0]));
   if(event.kind===1059)return tag(event,'p').length===1&&known.includes(tag(event,'p')[0]);
   if(known.includes(event.pubkey))return true;
   // Native bootstrap publishes its public KeyPackage before returning its pubkey.
