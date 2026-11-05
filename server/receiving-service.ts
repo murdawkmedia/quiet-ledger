@@ -1,3 +1,4 @@
+import {receivingAdapterSupportsCurrency} from '../shared/receiving.js';
 import {invoiceAllowsMethod} from '../shared/invoice-options.js';
 import {randomUUID,randomBytes} from 'node:crypto';
 import type {Invoice,Receipt} from '../shared/contracts.js';
@@ -17,7 +18,7 @@ export class ReceivingService {
     if(new Set(adapters.map(a=>a.id)).size!==adapters.length)throw new Error('Receiving adapter ids must be unique.');
     store.db.exec('CREATE TABLE IF NOT EXISTS receiving_requests(id TEXT PRIMARY KEY,workspace TEXT NOT NULL,invoice_id TEXT NOT NULL REFERENCES invoices(id),token TEXT NOT NULL UNIQUE,allocation_key TEXT UNIQUE,payment_key TEXT UNIQUE,data TEXT NOT NULL)');
   }
-  metadata(){return this.adapters.map(({id,methods,mode,walletOptionIds,label,supportedCurrencies})=>({id,methods,mode,walletOptionIds,...(label?{label}:{}),...(supportedCurrencies?{supportedCurrencies}:{})}));}
+  metadata(){return this.adapters.map(({id,methods,mode,walletOptionIds,label,supportedCurrencies,supportedCurrenciesByMethod})=>({id,methods,mode,walletOptionIds,...(label?{label}:{}),...(supportedCurrencies?{supportedCurrencies}:{}),...(supportedCurrenciesByMethod?{supportedCurrenciesByMethod}:{})}));}
   hasLive(){return this.adapters.some(adapter=>adapter.mode==='live');}
   private adapter(id:string){const adapter=this.adapters.find(a=>a.id===id);if(!adapter)throw new DomainError(503,'This receiving connection is not configured. Choose a configured wallet or provider.');return adapter;}
   private get(id:string,workspace?:string):Stored{
@@ -51,7 +52,7 @@ export class ReceivingService {
     if(!keyValid(key))throw new DomainError(400,'A valid Idempotency-Key header is required.');
     const adapter=this.adapter(input.adapterId);if(!adapter.methods.includes(input.method))throw new DomainError(409,'This provider does not support the selected method.');
     const invoice=this.store.getInvoice(input.invoiceId,workspace);if(!invoice)throw new DomainError(404,'Invoice not found.');if(!invoiceAllowsMethod(invoice,input.method))throw new DomainError(400,'This payment method is not accepted for this invoice.');
-    if(adapter.supportedCurrencies&&!adapter.supportedCurrencies.includes(invoice.currency))throw new DomainError(409,`This provider does not support ${invoice.currency} invoices. Choose a supported currency or another provider.`);
+    if(!receivingAdapterSupportsCurrency(adapter,invoice.currency,input.method))throw new DomainError(409,`This provider does not support ${invoice.currency} for the selected method. Choose a supported currency or another provider.`);
     const scope=`receiving:${workspace}`;
     const prior=this.store.db.prepare('SELECT response FROM idempotency WHERE scope=? AND key=?').get(scope,key!);
     let intent:Stored;

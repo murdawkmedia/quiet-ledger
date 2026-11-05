@@ -12,6 +12,8 @@ login or a server restart. Your provider account must already exist.
    an invoice, charge or outgoing transaction.
 4. Open **Payment methods** or a customer checkout to use the saved connection.
    Invoice prices use the selected currency; provider eligibility still applies.
+   ACH requires USD, SEPA requires EUR and Interac requires CAD. Unsupported
+   currency/method combinations are filtered before a receiving request is saved.
 
 Credentials are encrypted on the server and never returned in connection lists.
 The hosting operator can decrypt them. Use restricted receiving/read credentials

@@ -10,7 +10,7 @@ import { Store, DomainError, hash, type StoredSession } from './store.js';
 import { createInvoice, createQuote, approvePayout, advancePayout, settleInvoice, publicInvoice, seedDemo, parse, token } from './domain.js';
 import { SquareSandbox,type SquareSandboxOptions } from './square-sandbox.js';
 import {InvoiceTemplates} from './invoice-templates.js';
-import {invoiceAllowsMethod} from '../shared/invoice-options.js';
+import {invoiceAllowsMethod,invoiceRequiresManualReport} from '../shared/invoice-options.js';
 import {PaymentReports} from './payment-reports.js';
 import {METHOD_DEFINITIONS,PAYMENT_METHOD_IDS,methodInfo,receivedValue,canFundPayout} from '../shared/payment-methods.js';
 import {WALLET_OPTIONS} from '../shared/wallet-options.js';
@@ -258,7 +258,7 @@ export function createApp(options: AppOptions) {
       if (!found) throw new DomainError(404, 'Checkout not found.');
       if((hosted||found.workspace==='owner')&&receivingFor(found.workspace).hasLive())throw new DomainError(409,'This business uses live receiving. Choose a configured live payment method.');
       if(!invoiceAllowsMethod(found.invoice,input.method))throw new DomainError(400,'This payment method is not accepted for this invoice.');
-      if(found.invoice.status!=='paid'&&['manual','adjustment'].includes(methodInfo(input.method).family)&&input.method!=='bank_transfer')return {invoice:publicView(found.invoice),alreadyPaid:false,report:paymentReports.report(found.workspace,found.invoice.id,input.method,now())};
+      if(found.invoice.status!=='paid'&&invoiceRequiresManualReport(found.invoice,input.method))return {invoice:publicView(found.invoice),alreadyPaid:false,report:paymentReports.report(found.workspace,found.invoice.id,input.method,now())};
       return settleInvoice(store, found.workspace, found.invoice, input.method, now());
     });
     sendResult(res, result);

@@ -118,3 +118,24 @@ test('owner explicitly switches to test receiving while live remains the default
   await expect(page.getByRole('combobox',{name:'Receiving adapter',exact:true})).toHaveValue(testAdapter.id);
   await page.getByRole('button',{name:'Create test receiving request',exact:true}).click();await expect(page.getByRole('link',{name:'Open payment page',exact:true})).toBeVisible();
 });
+
+test('receiving choices follow invoice currency and accepted methods, then reset stale selections',async({page})=>{
+ await workspace(page,true);
+ const usd={...invoice,id:'fictional-usd-soak',currency:'USD',acceptedMethods:['wire','ach','interac']};
+ const cad={...invoice,id:'fictional-cad-soak',acceptedMethods:['interac']};
+ const manual={id:'fictional-manual-soak',mode:'live',methods:['wire','ach','interac'],supportedCurrenciesByMethod:{ach:['USD'],interac:['CAD']}};
+ await page.route('**/api/dashboard',route=>route.fulfill({json:{totals:{invoicedCad:2400,receivedCad:0,availableCad:0,spentCad:0},invoices:[usd,cad],payouts:[],activity:[]}}));
+ await page.route('**/api/payment-methods',route=>route.fulfill({json:{methods:METHOD_DEFINITIONS,adapters:[manual],defaultMode:'live'}}));
+ await page.route('**/api/receiving',route=>route.fulfill({json:{requests:[],adapters:[manual]}}));
+ await page.goto('/payment-methods');
+ const invoices=page.getByRole('combobox',{name:'Invoice to receive',exact:true}),methods=page.getByRole('combobox',{name:'Receiving method',exact:true}),adapters=page.getByRole('combobox',{name:'Receiving adapter',exact:true});
+ await invoices.selectOption(usd.id);
+ await expect(methods.locator('option[value="interac"]')).toHaveCount(0);
+ await expect(methods.locator('option[value="ach"]')).toHaveCount(1);
+ await expect(methods.locator('option[value="wire"]')).toHaveCount(1);
+ await methods.selectOption('wire');await expect(adapters).toHaveValue(manual.id);
+ await invoices.selectOption(cad.id);await expect(methods).toHaveValue('');await expect(adapters).toHaveValue('');
+ await expect(methods.locator('option')).toHaveCount(2);await expect(methods.locator('option[value="interac"]')).toHaveCount(1);
+ await expect(page.getByRole('button',{name:'Create live receiving request',exact:true})).toBeDisabled();
+ await methods.selectOption('interac');await expect(page.getByRole('button',{name:'Create live receiving request',exact:true})).toBeEnabled();
+});

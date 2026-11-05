@@ -19,6 +19,8 @@ export interface ReceivingAdapter {
   id:string;methods:MethodId[];mode:'live'|'test';walletOptionIds?:string[];
   /** Optional pricing currencies this adapter supports; omission leaves validation to the adapter. */
   supportedCurrencies?:AdapterCurrency[];
+  /** Local payment rails may support a narrower currency set than their adapter. */
+  supportedCurrenciesByMethod?:Partial<Record<MethodId,AdapterCurrency[]>>;
   /** Public provider name only; never a private connection alias or credential. */
   label?:string;
   /** Replay after interruption requires explicit provider idempotency or a side-effect-free operation. */
@@ -34,3 +36,10 @@ export interface ReceivingRecord {
   intent?:ReceivingIntent;receipt?:{number:string;mode:'live'|'test';method:MethodId;amount:number;currency:AdapterCurrency;verifiedAt:string};
   creationUncertain?:boolean;reviewReason?:string;
 }
+
+/** Intersect provider-wide and payment-method currency constraints before allocation. */
+export function receivingAdapterSupportsCurrency(adapter:{supportedCurrencies?:readonly string[];supportedCurrenciesByMethod?:Partial<Record<MethodId,readonly string[]>>},currency:string,method:string){
+ const currencies=adapter.supportedCurrenciesByMethod?.[method as MethodId];
+ return (!adapter.supportedCurrencies||adapter.supportedCurrencies.includes(currency))&&(!currencies||currencies.includes(currency));
+}
+export const MANUAL_RAIL_CURRENCIES:Partial<Record<MethodId,AdapterCurrency[]>>={interac:['CAD'],ach:['USD'],sepa:['EUR']};

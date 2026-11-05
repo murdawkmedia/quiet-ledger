@@ -1,3 +1,4 @@
+import {MANUAL_RAIL_CURRENCIES} from '../shared/receiving.js';
 import {randomBytes} from 'node:crypto';
 import {createCryptoAdapter} from '../integrations/crypto-receiving.js';
 import {createLnurlAdapter} from '../integrations/lnurl-receiving.js';
@@ -119,7 +120,7 @@ export function buildConnectionAdapter(connection:NormalizedConnection,options:C
   }
   else if(provider==='square')adapter=createSquareReceivingAdapter(squareConfig(connection,options));
   else if(provider==='static-crypto')adapter=createCryptoAdapter({...shared,kind:'manual',method:f.method as 'bitcoin'|'liquid'|'usdt'|'usdc',address:f.address,network:f.network});
-  else if(provider==='bank-instructions')adapter={id,mode,creationRetrySafe:true,methods:[f.method as MethodId],
+  else if(provider==='bank-instructions')adapter={id,mode,creationRetrySafe:true,methods:[f.method as MethodId],supportedCurrencies:['CAD','USD','EUR','GBP'],supportedCurrenciesByMethod:MANUAL_RAIL_CURRENCIES,
     async create(context){
       if(context.mode!==mode||context.method!==f.method||context.expectedAtomic!==String(context.amount)||!Number.isSafeInteger(context.amount)||context.amount<=0||!['CAD','USD','EUR','GBP'].includes(context.currency)||(context.method==='interac'&&context.currency!=='CAD')||(context.method==='ach'&&context.currency!=='USD')||(context.method==='sepa'&&context.currency!=='EUR'))throw invalid();
       return {providerId:context.requestId,asset:context.currency,network:'manual',instructions:[{label:'Recipient',value:f.recipient},{label:'Receiving instructions',value:f.instructions},{label:'Payment reference',value:context.requestId},{label:'Confirmation',value:'The merchant must independently confirm the exact received amount. Payer reports do not prove payment.'}]};

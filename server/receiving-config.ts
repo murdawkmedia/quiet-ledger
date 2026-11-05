@@ -1,3 +1,4 @@
+import {MANUAL_RAIL_CURRENCIES} from '../shared/receiving.js';
 import {constants,openSync,closeSync,fstatSync,readFileSync,realpathSync} from 'node:fs';
 import {dirname,isAbsolute,relative,resolve,sep} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -10,7 +11,7 @@ import type {ReceivingAdapter} from '../shared/receiving.js';
 import {methodInfo} from '../shared/payment-methods.js';
 
 export const manualReceiving:ReceivingAdapter={
-  id:'owner-confirmed-manual',mode:'live',creationRetrySafe:true,walletOptionIds:['manual-fiat','adjustment'],methods:['bank','wire','ach','sepa','interac','cash','check','gift_card','coupon','no_charge'],
+  id:'owner-confirmed-manual',mode:'live',creationRetrySafe:true,supportedCurrenciesByMethod:MANUAL_RAIL_CURRENCIES,walletOptionIds:['manual-fiat','adjustment'],methods:['bank','wire','ach','sepa','interac','cash','check','gift_card','coupon','no_charge'],
   async create(context){
     if(context.mode!=='live'||context.expectedAtomic!==String(context.amount))throw new Error('Manual receiving amount/mode mismatch.');
     if((context.method==='ach'&&context.currency!=='USD')||(context.method==='sepa'&&context.currency!=='EUR')||(context.method==='interac'&&context.currency!=='CAD'))throw new Error('Manual rail requires its local currency.');

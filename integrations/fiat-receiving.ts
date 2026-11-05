@@ -65,6 +65,7 @@ export function createFiatAdapter(config:FiatAdapterConfig):ReceivingAdapter{
   else if(config.provider==='revolut')adapter=revolut(config,mode,fetcher);
   else throw new Error('Unsupported fiat provider.');
   adapter.supportedCurrencies=['CAD','USD','EUR','GBP'];
+  adapter.supportedCurrenciesByMethod={ach:['USD'],cash_app_pay:['USD'],sepa:['EUR'],ideal:['EUR'],venmo:['USD'],pay_by_bank:config.merchantCountry==='GB'?['GBP']:['EUR']};
   return adapter;
 }
 function stripe(config:Extract<FiatAdapterConfig,{provider:'stripe'}>,mode:'live'|'test',fetcher:HttpFetch):ReceivingAdapter{

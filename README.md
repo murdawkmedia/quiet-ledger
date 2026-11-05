@@ -71,9 +71,9 @@ phone joining is optional and has not been qualified.
 ## Verification
 
 ```sh
+npm run build
 npm test
 npm run typecheck
-npm run build
 npm run test:e2e
 npx playwright test --config tests/invoice-editor-ui.config.ts
 python3 -m unittest discover -s tests -p 'test_*.py'

@@ -39,7 +39,7 @@ test('actual app BTC checkout preserves pending state then records one verified 
   const fixture=await startFixture(),errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
   try{
     await enter(page,fixture.origin);const invoice=await createInvoice(page,fixture.origin,'Synthetic live BTC browser invoice');
-    await page.goto(`${fixture.origin}/pay/${invoice.token}`);await expect(page.getByRole('button',{name:'Live payment',exact:true})).toHaveAttribute('aria-pressed','true');
+    await page.goto(`${fixture.origin}/pay/${invoice.token}`);await expect(page.getByText('Live checkout',{exact:true})).toBeVisible();
     await page.getByRole('combobox',{name:'Payment method',exact:true}).selectOption('bitcoin');await page.getByRole('button',{name:'Continue with live payment',exact:true}).click();
     await expect(page.getByRole('heading',{name:'A place for your payment.',exact:true})).toBeVisible();
     await expect(page.getByText('1,000 sats',{exact:true})).toBeVisible();await expect(page.getByText('mainnet',{exact:true})).toBeVisible();

@@ -33,3 +33,178 @@ test('KRW checkout offers only connections supporting the invoice currency',asyn
   await expect(methods).toHaveValue('bitcoin');
   await expect(methods.locator('option')).toHaveText(['Bitcoin']);
 });
+
+test('a slow initial template list preserves a template saved while it loads', async ({page}) => {
+  let finishLoad!: () => void;
+  const delayed = new Promise<void>(resolve => { finishLoad = resolve; });
+  await page.route('**/api/invoice-templates', async route => {
+    if (route.request().method() === 'GET') {
+      await delayed;
+      return route.fulfill({json:{templates:[]}});
+    }
+    await route.fulfill({json:{template:{id:'new-fictional-template',...route.request().postDataJSON()}}});
+  });
+  await page.goto('/tests/fixtures/invoice-editor-ui.html?demo');
+  await page.getByLabel('Template name',{exact:true}).fill('Fictional slow-load client');
+  await page.getByRole('button',{name:'Save as new template',exact:true}).click();
+  const picker = page.getByRole('combobox',{name:'Saved invoice template',exact:true});
+  await expect(picker).toHaveValue('new-fictional-template');
+  const loaded = page.waitForResponse(response => response.url().endsWith('/api/invoice-templates') && response.request().method() === 'GET');
+  finishLoad();
+  await loaded;
+  await expect(picker.locator('option[value="new-fictional-template"]')).toHaveText('Fictional slow-load client');
+});
+
+test('leaving the editor while creation is pending does not run its navigation callback', async ({page}) => {
+  await fixture(page);
+  await page.getByRole('combobox',{name:'Saved invoice template',exact:true}).selectOption('fixture-template');
+  let finishCreate!: () => void;
+  const delayed = new Promise<void>(resolve => { finishCreate = resolve; });
+  let started!: () => void;
+  const requested = new Promise<void>(resolve => { started = resolve; });
+  await page.route('**/api/invoices', async route => {
+    started();
+    await delayed;
+    await route.fulfill({status:201,json:{id:'created-fictional-invoice'}});
+  });
+  await page.getByRole('button',{name:'Create invoice',exact:true}).click();
+  await requested;
+  await page.getByRole('link',{name:'Cancel',exact:true}).click();
+  await expect(page.getByText('Fixture destination',{exact:true})).toBeVisible();
+  const completed = page.waitForResponse('**/api/invoices');
+  finishCreate();
+  await completed;
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  await expect(page.locator('body')).not.toHaveAttribute('data-created','true');
+});
+
+function checkoutFixture(overrides:Record<string,unknown> = {}) {
+  return {invoice:{...draft,number:'QL-FIXTURE',subtotal:200000,discountAmount:20000,premiumAmount:10000,tax:0,total:190000,status:'open',createdAt:'2026-11-05T00:00:00Z',...overrides},payment:{mode:'simulation',amountSats:190000,request:'fictional'},adapters:[]};
+}
+
+test('a bank-only invoice keeps the legacy bank button in owner-review mode', async ({page}) => {
+  const value = checkoutFixture({acceptedMethods:['bank']});
+  await page.route('**/api/checkout/fictional-checkout', route => route.fulfill({json:value}));
+  await page.route('**/api/checkout/fictional-checkout/pay', route => route.fulfill({json:{invoice:value.invoice,alreadyPaid:false,report:{id:'fictional-report',method:'bank_transfer',status:'reported',createdAt:'2026-11-05T00:00:00Z'}}}));
+  await page.goto('/tests/fixtures/invoice-editor-ui.html?checkout');
+  await page.getByRole('button',{name:/^Bank /}).click();
+  await expect(page.getByRole('button',{name:'Bank Owner review',exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Report bank transfer payment',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'Awaiting owner review.',exact:true})).toBeVisible();
+  await expect(page.getByText('No paid receipt has been issued.',{exact:true})).toBeVisible();
+  await expect(page.getByRole('link',{name:'View payment receipt',exact:false})).toHaveCount(0);
+});
+
+for (const acceptedMethods of [undefined,['bank_transfer']]) {
+  test(`legacy bank simulation remains available for ${acceptedMethods ? 'explicit legacy' : 'unrestricted'} terms`, async ({page}) => {
+    await page.route('**/api/checkout/fictional-checkout', route => route.fulfill({json:checkoutFixture({acceptedMethods})}));
+    await page.goto('/tests/fixtures/invoice-editor-ui.html?checkout');
+    await page.getByRole('button',{name:'Bank Transfer simulation',exact:true}).click();
+    await expect(page.getByRole('button',{name:'Pay with simulated bank transfer',exact:true})).toBeVisible();
+  });
+}
+
+test('multi-line totals survive removing a line and explicit currency changes', async ({page}) => {
+  const calls = await fixture(page);
+  await page.getByRole('combobox',{name:'Saved invoice template',exact:true}).selectOption('fixture-template');
+  await page.getByLabel('Invoice currency',{exact:true}).selectOption('CAD');
+  await page.getByLabel('Item 1 quantity',{exact:true}).fill('3');
+  await page.getByLabel('Item 1 unit price',{exact:true}).fill('19.99');
+  await page.getByRole('button',{name:'Add line item',exact:true}).click();
+  await page.getByLabel('Item 2 description',{exact:true}).fill('Fictional second service');
+  await page.getByLabel('Item 2 quantity',{exact:true}).fill('2');
+  await page.getByLabel('Item 2 unit price',{exact:true}).fill('0.01');
+  await page.getByLabel('Tax rate (%)',{exact:true}).fill('5');
+  await page.getByLabel('Discount (%)',{exact:true}).fill('12.34');
+  await page.getByLabel('Premium (%)',{exact:true}).fill('2.5');
+  await expect(page.getByTestId('invoice-total')).toHaveText('$56.79');
+  await page.getByRole('button',{name:'Remove item 1',exact:true}).click();
+  await expect(page.getByLabel('Item 1 description',{exact:true})).toHaveValue('Fictional second service');
+  await expect(page.getByLabel('Item 1 quantity',{exact:true})).toHaveValue('2');
+  await expect(page.getByTestId('invoice-total')).toHaveText('$0.02');
+  for (const currency of ['USD','EUR','GBP']) {
+    await page.getByLabel('Invoice currency',{exact:true}).selectOption(currency);
+    await expect(page.getByLabel('Item 1 unit price',{exact:true})).toHaveValue('0.01');
+  }
+  await page.getByLabel('Invoice currency',{exact:true}).selectOption('KRW');
+  await page.getByRole('button',{name:'Create invoice',exact:true}).click();
+  await expect(page.getByRole('alert')).toContainText('whole-won');
+  expect(calls).toHaveLength(0);
+  await page.getByLabel('Item 1 unit price',{exact:true}).fill('200');
+  await expect(page.getByTestId('invoice-total')).toHaveText(/379/);
+  await page.getByRole('button',{name:'Create invoice',exact:true}).click();
+  await expect(page.locator('body')).toHaveAttribute('data-created','true');
+  expect(calls[0].body).toMatchObject({currency:'KRW',items:[{description:'Fictional second service',quantity:2,unitAmount:200}],taxBps:500,discountBps:1234,premiumBps:250});
+});
+
+test('empty payment selections fail locally and invoice retries reuse the same request key', async ({page}) => {
+  await fixture(page);
+  await page.getByRole('combobox',{name:'Saved invoice template',exact:true}).selectOption('fixture-template');
+  await page.getByLabel('Accept Bitcoin',{exact:true}).uncheck();
+  await page.getByRole('button',{name:'Create invoice',exact:true}).click();
+  await expect(page.getByRole('alert')).toContainText('Choose at least one');
+  await page.getByLabel('Accept Bitcoin',{exact:true}).check();
+  const attempts:{body:unknown;key:string|undefined}[] = [];
+  await page.route('**/api/invoices', async route => {
+    attempts.push({body:route.request().postDataJSON(),key:route.request().headers()['idempotency-key']});
+    if (attempts.length === 1) return route.abort('connectionreset');
+    await route.fulfill({status:201,json:{id:'saved-before-lost-response'}});
+  });
+  await page.getByRole('button',{name:'Create invoice',exact:true}).click();
+  await expect(page.getByRole('alert')).toBeVisible();
+  await page.getByRole('button',{name:'Create invoice',exact:true}).click();
+  await expect(page.locator('body')).toHaveAttribute('data-created','true');
+  expect(attempts).toHaveLength(2);
+  expect(attempts[0].key).toBeTruthy();
+  expect(attempts[1]).toEqual(attempts[0]);
+});
+
+test('checkout filters each manual method by the invoice currency before offering it', async ({page}) => {
+  const value = {...checkoutFixture({currency:'USD',acceptedMethods:['interac','wire']}),adapters:[{id:'fictional-manual',mode:'live',configured:true,methods:['interac','wire'],supportedCurrenciesByMethod:{interac:['CAD']}}]};
+  await page.route('**/api/checkout/fictional-checkout', route => route.fulfill({json:value}));
+  await page.goto('/tests/fixtures/invoice-editor-ui.html?checkout');
+  const methods = page.getByRole('combobox',{name:'Payment method',exact:true});
+  await expect(methods.locator('option')).toHaveText(['Wire transfer']);
+  await expect(methods).toHaveValue('wire');
+});
+
+const receivingFixture = {
+  id:'fictional-receiving',token:'fictional-receiving',invoiceId:'fictional-invoice',invoiceNumber:'QL-FIXTURE',method:'bitcoin',adapterId:'fictional-adapter',mode:'live',status:'awaiting_payment',amount:10000,currency:'CAD',expectedAtomic:'100000',createdAt:'2026-11-05T20:00:00Z',expiresAt:'2026-11-05T20:01:00Z',
+  intent:{providerId:'fictional-provider',url:'https://pay.fixture.example/payment',request:'fictional-payment-address',network:'bitcoin',asset:'BTC',instructions:[{label:'Fictional instructions',value:'Fictional payment instruction contents'}]}
+};
+
+test('an open receiving page retires payment details when the request expires', async ({page}) => {
+  await page.clock.install({time:new Date('2026-11-05T20:00:00Z')});
+  await page.route('**/api/receive/fictional-receiving', route => route.fulfill({json:{request:receivingFixture}}));
+  await page.goto('/tests/fixtures/invoice-editor-ui.html?receive');
+  await expect(page.getByRole('link',{name:'Open secure provider checkout',exact:false})).toBeVisible();
+  await expect(page.getByText('fictional-payment-address',{exact:true})).toBeVisible();
+  await page.clock.fastForward(61000);
+  await expect(page.getByText('Payment request expired',{exact:true})).toBeVisible();
+  await expect(page.getByRole('link',{name:'Open secure provider checkout',exact:false})).toHaveCount(0);
+  await expect(page.getByText('fictional-payment-address',{exact:true})).toHaveCount(0);
+  await expect(page.getByText('Fictional payment instruction contents',{exact:true})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Check payment',exact:true})).toBeEnabled();
+});
+
+test('an already expired receiving request hides its payment instructions', async ({page}) => {
+  await page.clock.install({time:new Date('2026-11-05T20:02:00Z')});
+  await page.route('**/api/receive/fictional-receiving', route => route.fulfill({json:{request:receivingFixture}}));
+  await page.goto('/tests/fixtures/invoice-editor-ui.html?receive');
+  await expect(page.getByText('Payment request expired',{exact:true})).toBeVisible();
+  await expect(page.getByText('Fictional payment instruction contents',{exact:true})).toHaveCount(0);
+});
+
+test('configured live checkout never advertises a simulation that the server rejects',async({page})=>{
+ await page.route('**/api/checkout/fictional-checkout',route=>route.fulfill({json:{invoice:{...draft,acceptedMethods:['bitcoin'],number:'QL-LIVE-SOAK',subtotal:200000,tax:0,total:200000,status:'open',createdAt:'2026-11-05T00:00:00Z'},payment:{mode:'simulation',amountSats:200000,request:'fictional'},adapters:[{id:'live-bitcoin',mode:'live',configured:true,methods:['bitcoin']}]}}));
+ await page.goto('/tests/fixtures/invoice-editor-ui.html?checkout');
+ await expect(page.getByRole('button',{name:'Continue with live payment',exact:true})).toBeEnabled();
+ await expect(page.getByRole('button',{name:'Try simulation',exact:true})).toHaveCount(0);
+});
+
+test('live connections that cannot serve this currency cannot fall back to simulated payment',async({page})=>{
+ await page.route('**/api/checkout/fictional-checkout',route=>route.fulfill({json:{invoice:{...draft,acceptedMethods:['card'],number:'QL-LIVE-CURRENCY-SOAK',subtotal:200000,tax:0,total:200000,status:'open',createdAt:'2026-11-05T00:00:00Z'},payment:{mode:'simulation',amountSats:200000,request:'fictional'},adapters:[{id:'live-card',mode:'live',configured:true,methods:['card'],supportedCurrencies:['CAD','USD']}]}}));
+ await page.goto('/tests/fixtures/invoice-editor-ui.html?checkout');
+ await expect(page.getByText('No configured live payment method matches this invoice. Ask the merchant for another connection or a supported invoice currency.',{exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Continue with live payment',exact:true})).toBeDisabled();
+});
