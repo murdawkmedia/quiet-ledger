@@ -1,0 +1,12 @@
+ARG BASE_IMAGE=node:26-slim
+FROM ${BASE_IMAGE}
+USER root
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN if test -d node_modules; then npm install --omit=dev --ignore-scripts --no-audit --no-fund; else npm ci --omit=dev --ignore-scripts --no-audit --no-fund; fi && npm cache clean --force
+COPY server ./server
+COPY ops ./ops
+ENV NODE_ENV=production HOST=0.0.0.0 PORT=4317 DATA_DIR=/data HOSTED_ACCOUNTS=true
+USER node
+EXPOSE 4317
+CMD ["node", "server/index.js"]

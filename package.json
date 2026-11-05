@@ -1,0 +1,59 @@
+{
+  "name": "private-invoicing-mvp",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "node --env-file-if-exists=.env --import tsx server/index.ts",
+    "start": "NODE_ENV=production node --env-file-if-exists=.env --import tsx server/index.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "npm run typecheck && vite build",
+    "test": "tsx --test tests/*.test.ts",
+    "test:e2e": "playwright test && playwright test --config tests/hardening-browser.config.ts && npm run test:e2e:accounts && npm run test:e2e:passkeys && npm run test:e2e:connections && npm run test:e2e:saved-connections && npm run test:e2e:marmot",
+    "test:e2e:core": "playwright test",
+    "test:e2e:adversarial": "playwright test --config tests/hardening-browser.config.ts",
+    "mcp": "node --import tsx server/mcp.ts",
+    "test:e2e:accounts": "playwright test --config tests/hosted-accounts-browser.config.ts",
+    "build:hosted": "npm run build && node scripts/build-hosted.mjs",
+    "test:e2e:passkeys": "playwright test --config tests/passkey-manager-browser.config.ts",
+    "test:e2e:connections": "playwright test --config tests/connections-ui.config.ts",
+    "test:e2e:saved-connections": "playwright test --config tests/saved-connections-browser.config.ts",
+    "test:e2e:marmot": "playwright test --config tests/conversations-ui.config.ts && playwright test --config tests/marmot-demo-browser.config.ts"
+  },
+  "dependencies": {
+    "@fontsource/dm-sans": "5.3.0",
+    "@fontsource/lora": "5.3.0",
+    "@internet-privacy/marmot-ts": "0.9.0",
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "@simplewebauthn/browser": "14.0.0",
+    "@simplewebauthn/server": "14.0.3",
+    "bolt11": "1.4.2",
+    "express": "5.3.0",
+    "lucide-react": "1.68.0",
+    "nostr-tools": "2.25.5",
+    "qrcode": "1.5.4",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "ws": "8.22.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "@types/express": "5.0.6",
+    "@types/node": "26.6.6",
+    "@types/qrcode": "1.5.6",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@types/supertest": "7.2.1",
+    "@types/ws": "8.18.2",
+    "@vitejs/plugin-react": "6.2.1",
+    "esbuild": "0.28.2",
+    "supertest": "7.3.1",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2",
+    "vite": "8.3.5"
+  }
+}

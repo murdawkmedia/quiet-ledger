@@ -1,0 +1,65 @@
+# Explicit opt-in override for the fictional hosted team. No public worker ports.
+# Payload name is compose-demo.yml; installer writes compose.demo.yml on the host.
+services:
+  app:
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 192
+    environment:
+      DEMO_TEAM_ENABLED: "true"
+      DEMO_TEAM_STATE_DIR: /demo-team
+      MARMOT_AGENT_BINARY: /tools/wn-agent
+      HERMES_DEMO_URL: http://hermes-demo:4420
+      HERMES_DEMO_TOKEN_FILE: /run/secrets/hermes-worker-token
+    volumes:
+      - type: bind
+        source: /opt/quiet-ledger/demo-team
+        target: /demo-team
+        bind: {create_host_path: false}
+      - type: bind
+        source: /opt/quiet-ledger/tools/wn-agent
+        target: /tools/wn-agent
+        read_only: true
+        bind: {create_host_path: false}
+    depends_on:
+      hermes-demo:
+        condition: service_healthy
+    networks:
+      demo_private: {}
+  hermes-demo:
+    image: quiet-ledger-hermes-demo:0.22.5
+    restart: unless-stopped
+    init: true
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 96
+    mem_limit: 512m
+    cpus: 1.0
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+      - /var/lib/quiet-ledger-hermes:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000,mode=0700
+    volumes:
+      - type: bind
+        source: /opt/quiet-ledger/secrets/hermes-worker-token
+        target: /run/secrets/worker-token
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: /opt/quiet-ledger/hermes-secrets/model-credential
+        target: /run/secrets/model-credential
+        read_only: true
+        bind: {create_host_path: false}
+    networks:
+      demo_private: {}
+      demo_egress: {}
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+networks:
+  demo_private:
+    internal: true
+  demo_egress: {}

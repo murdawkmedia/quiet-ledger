@@ -1,0 +1,11 @@
+[Unit]
+Description=Create and verify an encrypted Quiet Ledger backup
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -B /opt/quiet-ledger/backup-daily.py
+TimeoutStartSec=150
+UMask=0077
+Nice=10

@@ -1,0 +1,4 @@
+import {defineConfig} from '@playwright/test';
+import {resolve} from 'node:path';
+const artifacts=resolve(process.env.QUIET_LEDGER_TEAM_ARTIFACTS??'.runtime/demo-team-artifacts');
+export default defineConfig({testDir:'./browser',testMatch:'demo-team.spec.ts',workers:1,fullyParallel:false,timeout:240000,expect:{timeout:12000},outputDir:resolve(artifacts,'results'),reporter:[['list'],['json',{outputFile:resolve(artifacts,'report.json')}]],use:{baseURL:process.env.QUIET_LEDGER_TEAM_URL??'http://localhost:4335',browserName:'chromium',headless:true,reducedMotion:'reduce',actionTimeout:15000,launchOptions:{executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE??'/usr/bin/chromium'},screenshot:'only-on-failure',trace:'retain-on-failure'},webServer:process.env.QUIET_LEDGER_TEAM_URL?undefined:{command:'node --import tsx tests/marmot-demo-app.ts',cwd:resolve(import.meta.dirname,'..'),url:'http://localhost:4335/api/health',timeout:30000,reuseExistingServer:false}});

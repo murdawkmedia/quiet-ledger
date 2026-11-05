@@ -1,0 +1,32 @@
+services:
+  hermes-demo:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: quiet-ledger-hermes-demo:0.22.5
+    restart: unless-stopped
+    read_only: true
+    init: true
+    user: "1000:1000"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 96
+    mem_limit: 512m
+    cpus: 1.0
+    ports: ["127.0.0.1:4420:4420"]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+      - /var/lib/quiet-ledger-hermes:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000,mode=0700
+    volumes:
+      - type: bind
+        source: ${QUIET_LEDGER_WORKER_TOKEN_HOST_FILE:?set an absolute mode0600 file outside source}
+        target: /run/secrets/worker-token
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${QUIET_LEDGER_MODEL_CREDENTIAL_HOST_FILE:?set an absolute mode0600 scoped provider key file}
+        target: /run/secrets/model-credential
+        read_only: true
+        bind: {create_host_path: false}
+    # This worker has no relay/API/MCP credentials. The authenticated native MDK
+    # adapter alone may call /infer; keep this host port loopback-only.

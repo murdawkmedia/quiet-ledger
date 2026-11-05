@@ -1,0 +1,77 @@
+# HTTPS account edition. For one-computer HTTP localhost use setup-selfhost.mjs --start.
+# Run from the source root with --env-file /private/install/runtime.env.
+services:
+  app:
+    build:
+      context: ${QUIET_LEDGER_SOURCE_DIR:-..}
+      dockerfile: ops/Dockerfile.selfhost
+    image: quiet-ledger-selfhost:local
+    restart: unless-stopped
+    init: true
+    user: "${QUIET_LEDGER_UID:-1000}:${QUIET_LEDGER_GID:-1000}"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 128
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    environment:
+      NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=256
+      SELF_HOSTED: "true"
+      HOSTED_ACCOUNTS: "true"
+      HOST: 0.0.0.0
+      PORT: "4417"
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-https://localhost:4443}
+      DATA_DIR: /state/data
+      BACKUP_DIR: /state/backups
+      STORAGE_KEY_FILE: /state/secrets/storage-key
+      BACKUP_KEY_FILE: /state/secrets/backup-key
+      PROXY_SHARED_SECRET_FILE: /state/secrets/proxy-secret
+      SELFHOST_CLIENT_DIR: /app/public
+      HACKATHON_DEMO_ENABLED: ${HACKATHON_DEMO_ENABLED:-false}
+      SIMULATION_ONLY: "true"
+    volumes:
+      - ${QUIET_LEDGER_STATE_DIR:?Run setup-selfhost.mjs first}/data:/state/data
+      - ${QUIET_LEDGER_STATE_DIR:?Run setup-selfhost.mjs first}/backups:/state/backups
+      - ${QUIET_LEDGER_STATE_DIR:?Run setup-selfhost.mjs first}/secrets:/state/secrets:ro
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:4417/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1));"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+    networks: [private]
+  https:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      QUIET_LEDGER_SITE_ADDRESS: ${QUIET_LEDGER_SITE_ADDRESS:-https://localhost}
+    ports:
+      - "${QUIET_LEDGER_BIND_ADDRESS:-127.0.0.1}:${QUIET_LEDGER_HTTPS_PORT:-4443}:443"
+    volumes:
+      - ./Caddyfile.selfhost.example:/etc/caddy/Caddyfile:ro
+      - certificates:/data
+      - caddy-config:/config
+    security_opt: [no-new-privileges:true]
+    networks: [private]
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+networks:
+  private: {}
+volumes:
+  certificates: {}
+  caddy-config: {}

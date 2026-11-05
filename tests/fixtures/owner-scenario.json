@@ -1,0 +1,10 @@
+{
+  "title": "Synthetic owner-only planning scenario",
+  "sourceDate": "2026-11-01",
+  "status": "Fictional example; no banking action",
+  "summary": "A deliberately fictional private scenario for access-control tests.",
+  "metrics": [{ "label": "Synthetic planning amount", "amount": 876543, "currency": "CAD", "note": "Test fixture only." }],
+  "obligations": [],
+  "conditions": [{ "label": "Review fictional records", "status": "pending", "note": "No real lender or customer data." }],
+  "notes": ["This fixture contains no actual household figures."]
+}

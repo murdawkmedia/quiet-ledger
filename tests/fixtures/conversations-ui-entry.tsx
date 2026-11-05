@@ -1,0 +1,10 @@
+import {createRoot} from 'react-dom/client';
+import {HackathonDemoPage,ConversationsPage,CustomerConversationPage} from '../../client/screens/Conversations';
+import {setCsrf} from '../../client/api';
+import '../../client/styles.css';
+import type {Dashboard} from '../../shared/contracts';
+setCsrf('fictional-marmot-csrf');
+const invoice={id:'fictional-invoice',token:'fictional-checkout',number:'DEMO-001',title:'Fictional creative work',customerName:'Fictional Studio',currency:'CAD' as const,items:[{description:'Fictional illustration',quantity:1,unitAmount:4200}],taxBps:0,subtotal:4200,tax:0,total:4200,totalCad:4200,amountSats:42000,status:'open' as const,createdAt:'2026-11-05T12:00:00.000Z'};
+const data:Dashboard={invoices:[invoice],payouts:[],activity:[],totals:{invoicedCad:4200,receivedCad:0,availableCad:0,spentCad:0}};
+const screen=new URLSearchParams(location.search).get('screen');
+createRoot(document.getElementById('root')!).render(<main className="main-content">{screen==='owner'?<ConversationsPage data={data}/>:screen==='customer'?<CustomerConversationPage token="fictional-checkout"/>:<HackathonDemoPage/>}</main>);

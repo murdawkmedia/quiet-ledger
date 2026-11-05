@@ -1,0 +1,51 @@
+services:
+  app:
+    image: quiet-ledger:${APP_REVISION:?Set the reviewed revision}
+    container_name: quiet-ledger-app
+    restart: unless-stopped
+    init: true
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 384m
+    cpus: 0.75
+    pids_limit: 128
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    environment:
+      NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=192
+      HOST: 0.0.0.0
+      PORT: "4317"
+      DATA_DIR: /data
+      BACKUP_DIR: /backups
+      HOSTED_ACCOUNTS: "true"
+      HACKATHON_DEMO_ENABLED: ${HACKATHON_DEMO_ENABLED:-false}
+      SIMULATION_ONLY: "true"
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:?Set the stable public HTTPS origin}
+      ALLOWED_HOSTS: ${BACKEND_HOST:?Set the private proxy origin host},localhost,127.0.0.1
+      STORAGE_KEY_FILE: /run/secrets/storage-key
+      PROXY_SHARED_SECRET_FILE: /run/secrets/proxy-secret
+      BACKUP_KEY_FILE: /run/secrets/backup-key
+    volumes:
+      - ./data:/data
+      - ./secrets:/run/secrets:ro
+      - ./backups:/backups
+    networks:
+      shc_frontdoor:
+        aliases: [quiet-ledger]
+    healthcheck:
+      test: [CMD, node, -e, "const fs=require('node:fs');fetch('http://127.0.0.1:4317/api/health',{headers:{'x-quiet-ledger-proxy':fs.readFileSync('/run/secrets/proxy-secret','utf8').trim()}}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1));"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+networks:
+  shc_frontdoor:
+    external: true

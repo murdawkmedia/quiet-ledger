@@ -1,0 +1,11 @@
+import {createRoot} from 'react-dom/client';
+import {ConnectionsPage} from '../../client/screens/Connections';
+import {PaymentMethodsPage} from '../../client/screens/PaymentMethods';
+import App from '../../client/App';
+import {setCsrf} from '../../client/api';
+import '../../client/styles.css';
+setCsrf('synthetic-connections-csrf');
+const payments=new URLSearchParams(location.search).get('screen')==='payment-methods';
+const fullApp=new URLSearchParams(location.search).get('screen')==='full-app';
+if(fullApp)history.replaceState({},'','/integrations');
+createRoot(document.getElementById('root')!).render(fullApp?<App/>:<main className="main-content">{payments?<PaymentMethodsPage owner hosted data={{invoices:[],payouts:[],activity:[],totals:{invoicedCad:0,receivedCad:0,availableCad:0,spentCad:0}}} refreshDashboard={async()=>{}}/>:<ConnectionsPage/>}</main>);

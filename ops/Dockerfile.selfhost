@@ -1,0 +1,27 @@
+# Build from the source directory: docker build -f ops/Dockerfile.selfhost .
+FROM node:26-slim AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --ignore-scripts --no-audit --no-fund
+COPY client ./client
+COPY server ./server
+COPY shared ./shared
+COPY integrations ./integrations
+COPY functions ./functions
+COPY scripts ./scripts
+COPY ops ./ops
+COPY tsconfig.json vite.config.ts ./
+RUN npx vite build && node scripts/build-hosted.mjs \
+    && rm -f dist/hosted/public/_worker.js dist/hosted/public/_routes.json dist/hosted/public/_headers
+
+FROM node:26-slim
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund && npm cache clean --force
+COPY --from=build /app/dist/hosted/server ./server
+COPY --from=build /app/dist/hosted/ops ./ops
+COPY --from=build /app/dist/hosted/public ./public
+ENV NODE_ENV=production SELF_HOSTED=true HOSTED_ACCOUNTS=true HOST=0.0.0.0 PORT=4417 SELFHOST_CLIENT_DIR=/app/public
+USER node
+EXPOSE 4417
+CMD ["node", "server/index.js"]

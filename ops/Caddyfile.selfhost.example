@@ -1,0 +1,8 @@
+# Local example: https://localhost, mapped by Compose to localhost:4443.
+# Caddy automatically uses its local CA for localhost. Trust that CA explicitly
+# in the demo browser, or use a domain you own with public HTTPS certificates.
+{$QUIET_LEDGER_SITE_ADDRESS:https://localhost} {
+    # The application serves static assets and API at one origin. The private
+    # proxy gate is inserted in-process, never sent to the browser or Caddy.
+    reverse_proxy app:4417
+}
