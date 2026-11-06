@@ -147,3 +147,14 @@ test('saved verified requests can use the reserved space after new-record admiss
   assert.throws(()=>ledger.credit('owner',invoice.id,100,'Fictional new adjustment',clock),/storage budget/);
  }finally{store.close();}
 });
+
+
+test('expired uncertain creation retains its recovery classification without another allocation',async()=>{
+ const store=new Store(':memory:');let current=clock,creates=0;try{
+  const invoice=createInvoice(store,'owner',input,clock),base=adapter(),service=new ReceivingService(store,[{...base,create:async()=>{creates++;throw new Error('Fictional lost allocation response');}}],quote,()=>current),body={invoiceId:invoice.id,method:'lightning' as const,adapterId:base.id,amount:300};
+  await assert.rejects(service.create('owner',body,'fictional-expired-uncertain'));
+  current=new Date(clock.getTime()+900000);
+  await assert.rejects(service.create('owner',body,'fictional-expired-uncertain'),(error:unknown)=>Boolean(error&&typeof error==='object'&&'code' in error&&error.code==='RECEIVING_UNCERTAIN'));
+  assert.equal(creates,1);assert.equal(service.list().requests.length,1);
+ }finally{store.close();}
+});

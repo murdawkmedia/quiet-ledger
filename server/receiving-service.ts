@@ -80,7 +80,10 @@ export class ReceivingService {
     }
     const record=await this.serial(intent.id,async()=>{
       const saved=this.get(intent.id,workspace);if(saved.status!=='creation_pending')return saved;
-      if(Date.parse(saved.expiresAt)<=this.now().getTime())throw new DomainError(409,'This request expired before creation. Create a fresh request with a new retry key.');
+      if(Date.parse(saved.expiresAt)<=this.now().getTime()){
+        if(saved.creationUncertain)throw new DomainError(409,'This expired request still has uncertain provider creation. Reconcile the original request before replacing it.','RECEIVING_UNCERTAIN');
+        throw new DomainError(409,'This request expired before creation. Create a fresh request with a new retry key.');
+      }
       let result:ReceivingIntent;
       try{
         // Persist uncertainty before external work: a killed process cannot catch a timeout.
