@@ -56,6 +56,11 @@ function sessionToken(req: Request): string | undefined {
   const value = item?.slice('ql_session='.length);
   return value && /^[a-zA-Z0-9_-]{43}$/.test(value) ? value : undefined;
 }
+function demoResumeToken(req:Request):string|undefined {
+  const values=req.headers.cookie?.split(';').map(value=>value.trim()).filter(value=>value.startsWith('ql_demo_resume='))??[];
+  const value=values.length===1?values[0].slice('ql_demo_resume='.length):undefined;
+  return value&&/^[A-Za-z0-9_-]{43}$/.test(value)?value:undefined;
+}
 function sameOrigin(req: Request, res: Response, next: NextFunction) {
   const origin = req.get('origin');
   if (origin) {
@@ -184,14 +189,19 @@ export function createApp(options: AppOptions) {
     privateScenarioAvailable: !hosted&&session?.role === 'owner' && Boolean(options.privateScenarioPath && existsSync(options.privateScenarioPath)),
   });
   const failedLogins = new Map<string, { count: number; until: number }>();
-  function establishSession(req: Request, res: Response, role: 'demo' | 'owner',account?:{id:string;workspaceId:string},demo?:{expiresAt:string}) {
+  function rememberDemoBrowser(req:Request,res:Response,visit:{expiresAt:string;resumeToken?:string}) {
+    if(visit.resumeToken)res.cookie('ql_demo_resume',visit.resumeToken,{httpOnly:true,sameSite:'strict',secure:Boolean(hosted)||req.secure,path:'/',maxAge:Math.max(0,Date.parse(visit.expiresAt)-now().getTime())});
+  }
+  function establishSession(req: Request, res: Response, role: 'demo' | 'owner',account?:{id:string;workspaceId:string},demo?:{expiresAt:string;sessionExpiresAt?:string;resumeToken?:string}) {
+    if(demo)store.assertWriteBudget();
     if(!demo)store.removeExpiredSessions(now().toISOString());
     const value = token();
     const previousToken = sessionToken(req);
     if (previousToken) store.removeSession(previousToken);
-    const session: StoredSession = { role, workspace: account?.workspaceId??role,...(account?{accountId:account.id}:{}),...(demo?{hackathonDemo:true}:{}), csrf: randomBytes(24).toString('base64url'), expires: demo?.expiresAt??new Date(now().getTime() + 86400000).toISOString() };
+    const session: StoredSession = { role, workspace: account?.workspaceId??role,...(account?{accountId:account.id}:{}),...(demo?{hackathonDemo:true}:{}), csrf: randomBytes(24).toString('base64url'), expires: demo?.sessionExpiresAt??demo?.expiresAt??new Date(now().getTime() + 86400000).toISOString() };
     store.saveSession(value, session);
-    res.cookie('ql_session', value, { httpOnly: true, sameSite: 'strict', secure: Boolean(hosted)||req.secure, path: '/', maxAge: demo?Math.max(0,Date.parse(demo.expiresAt)-now().getTime()):86400000 });
+    res.cookie('ql_session', value, { httpOnly: true, sameSite: 'strict', secure: Boolean(hosted)||req.secure, path: '/', maxAge: demo?Math.max(0,Date.parse(session.expires)-now().getTime()):86400000 });
+    if(demo)rememberDemoBrowser(req,res,demo);
     res.json(sessionView(session));
   }
   app.post('/api/session/hackathon-demo',sameOrigin,(req,res)=>{
@@ -200,7 +210,7 @@ export function createApp(options: AppOptions) {
     if(!req.is('application/json'))throw new DomainError(415,'Send the demo password as JSON.');
     const input=parse(z.object({password:z.string().min(1).max(128)}).strict(),req.body);
     store.transaction(()=>{
-      const visit=hackathonDemo!.start(input.password,String(res.locals.clientIp??'unknown'));
+      const visit=hackathonDemo!.start(input.password,String(res.locals.clientIp??'unknown'),demoResumeToken(req));
       establishSession(req,res,'demo',{id:visit.accountId,workspaceId:visit.workspace},visit);
     });
   });
@@ -224,7 +234,16 @@ export function createApp(options: AppOptions) {
   app.use(createApiAccess({keys:hosted?[]:options.apiKeys??[],resolve:accountKeys?.resolve}));
   app.use('/api',(_req,res,next)=>{const access=res.locals.apiAccess;if(access)res.locals.session={role:'owner',workspace:access.workspace??'owner',...(access.accountId?{accountId:access.accountId}:{}),csrf:'',expires:new Date(now().getTime()+60000).toISOString()};next();});
   app.get('/api/health', (_req, res) => res.json({ ok: true, mode: 'simulation',authMode:hosted?'hosted':'local' }));
-  app.get('/api/session', (_req, res) => res.json(sessionView(res.locals.session)));
+  app.get('/api/session', (req, res) => {
+    const session=res.locals.session as StoredSession|undefined;
+    if(demoEnabled&&session?.hackathonDemo){
+      let ownCookie=false;
+      try{const saved=hackathonDemo!.resume(demoResumeToken(req));ownCookie=saved.workspace===session.workspace&&saved.accountId===session.accountId;}
+      catch(error){if(!(error instanceof DomainError)||error.status!==404)throw error;}
+      if(!ownCookie)rememberDemoBrowser(req,res,hackathonDemo!.remember(session));
+    }
+    res.json(sessionView(session));
+  });
   if(hosted)app.use(['/api/session/owner','/api/session/demo','/api/scenario','/api/square-sandbox','/api/square-test'],(_req,res)=>res.status(404).json({error:'This local-only route is unavailable.'}));
   app.post('/api/session/demo', sameOrigin, (req, res) => establishSession(req, res, 'demo'));
   app.post('/api/session/owner', sameOrigin, (req, res) => {

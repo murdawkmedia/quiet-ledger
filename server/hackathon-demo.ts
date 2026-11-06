@@ -1,16 +1,20 @@
-import {createHash, randomUUID, timingSafeEqual} from 'node:crypto';
+import {createHash, randomBytes, randomUUID, timingSafeEqual} from 'node:crypto';
 import type {Invoice} from '../shared/contracts.js';
 import {createInvoice, settleInvoice} from './domain.js';
 import {DomainError, type Store, type StoredSession} from './store.js';
 
 export interface HackathonDemoOptions {store: Store; now?: () => Date}
 export interface HackathonDemoVisit {accountId: string; workspace: string; expiresAt: string; invoiceId: string}
+export interface HackathonDemoAccess extends HackathonDemoVisit {sessionExpiresAt: string; resumeToken?: string}
 export interface HackathonDemoView {invoice: Invoice; checkoutToken: string; expiresAt: string;caseVersion:number}
-type RecordData = HackathonDemoVisit & {kind: 'quiet-ledger-hackathon-demo-v1'; createdAt: string;caseVersion?:number};
+type RecordData = HackathonDemoVisit & {kind: 'quiet-ledger-hackathon-demo-v1' | 'quiet-ledger-hackathon-demo-v2'; createdAt: string;caseVersion?:number; resumeTokenHash?: string};
 type Window = {since: number; count: number};
 type ClientBudget = {failures?: Window; starts?: Window};
 const table = 'hackathon_demo_workspaces';
-const ttlMs = 2 * 60 * 60 * 1000;
+const sessionTtlMs = 2 * 60 * 60 * 1000;
+const retentionMs = 30 * 24 * 60 * 60 * 1000;
+const resumeCapability = /^[A-Za-z0-9_-]{43}$/;
+const tokenHash = /^[0-9a-f]{64}$/;
 const failureWindowMs = 10 * 60 * 1000;
 const startWindowMs = 60 * 60 * 1000;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -27,7 +31,7 @@ export class HackathonDemo {
     this.now = options.now ?? (() => new Date());
     this.store.db.exec(`CREATE TABLE IF NOT EXISTS ${table} (id TEXT PRIMARY KEY, account_id TEXT NOT NULL UNIQUE, expires_at TEXT NOT NULL, data TEXT NOT NULL);`);
   }
-  start(password: string, clientId: string): HackathonDemoVisit {
+  start(password: string, clientId: string, resumeToken?: unknown): HackathonDemoAccess {
     const now = this.now();
     const time = now.getTime();
     if (!Number.isFinite(time)) throw new DomainError(503, 'The demo is temporarily unavailable.');
@@ -39,8 +43,13 @@ export class HackathonDemo {
       throw new DomainError(401, 'The demo password was not accepted.');
     }
     const visit = this.store.transaction(() => {
+      this.cleanupExpiredSessions(now.toISOString());
+      if (resumeToken !== undefined) {
+        try {return this.resume(resumeToken);}
+        catch (error) {if (!(error instanceof DomainError) || error.status !== 404) throw error;}
+      }
       this.cleanupExpired(now.toISOString());
-      if (Number(this.store.db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()!.n) >= 32) throw new DomainError(503, 'All demo visits are currently in use. Try again after a visit expires.');
+      if (Number(this.store.db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()!.n) >= 256) throw new DomainError(503, 'All saved demo visits are currently in use. Return to your saved demo or try again after a visit expires.');
       this.store.assertWriteBudget();
       const workspace = randomUUID(), accountId = randomUUID();
       const invoice = createInvoice(this.store, workspace, {
@@ -49,15 +58,59 @@ export class HackathonDemo {
         note: 'Fictional demonstration only. Payments and receipts are simulations; no money moves.',
       }, now);
       this.store.saveInvoice({...invoice, settlementMode: 'simulation'});
-      const visit: HackathonDemoVisit = {workspace, accountId, invoiceId: invoice.id, expiresAt: new Date(now.getTime() + ttlMs).toISOString()};
-      const data: RecordData = {...visit, kind: 'quiet-ledger-hackathon-demo-v1', createdAt: now.toISOString()};
+      const visit: HackathonDemoVisit = {workspace, accountId, invoiceId: invoice.id, expiresAt: new Date(time + retentionMs).toISOString()};
+      const issuedToken = randomBytes(32).toString('base64url');
+      const data: RecordData = {...visit, kind: 'quiet-ledger-hackathon-demo-v2', createdAt: now.toISOString(), resumeTokenHash: digest(issuedToken).toString('hex')};
       this.store.db.prepare(`INSERT INTO ${table}(id,account_id,expires_at,data) VALUES(?,?,?,?)`).run(workspace, accountId, visit.expiresAt, this.store.encode(data, table, workspace, workspace));
-      return visit;
+      return {...this.access(data, time), resumeToken: issuedToken};
     });
     budget.starts ??= {since: time, count: 0};
     budget.starts.count++;
     budget.failures = undefined;
     return visit;
+  }
+  private cleanupExpiredSessions(now:string) {
+    for(const row of this.store.db.prepare('SELECT token_hash,data FROM sessions').all()){
+      let session:StoredSession;
+      try{session=this.store.decode(row.data,'sessions',String(row.token_hash));}catch{continue;}
+      if(!session||session.role!=='demo'||session.hackathonDemo!==true||!(Date.parse(session.expires)<=Date.parse(now)))continue;
+      const data=this.record(session.workspace);
+      if(data&&data.accountId===session.accountId)this.store.db.prepare('DELETE FROM sessions WHERE token_hash=? AND data=?').run(String(row.token_hash),row.data);
+    }
+  }
+  /** Only the opaque browser capability can recover a saved visit without a current session. */
+  resume(resumeToken: unknown): HackathonDemoAccess {
+    const time = this.now().getTime();
+    if (!Number.isFinite(time)) throw new DomainError(503, 'The demo is temporarily unavailable.');
+    if (typeof resumeToken !== 'string' || !resumeCapability.test(resumeToken)) throw missing();
+    const supplied = digest(resumeToken);
+    for (const row of this.store.db.prepare(`SELECT id FROM ${table} WHERE expires_at>?`).all(new Date(time).toISOString())) {
+      const data = this.record(String(row.id));
+      if (data?.kind === 'quiet-ledger-hackathon-demo-v2' && timingSafeEqual(supplied, Buffer.from(data.resumeTokenHash!, 'hex'))) {
+        this.view(data.workspace);
+        return this.access(data, time);
+      }
+    }
+    throw missing();
+  }
+  /** Upgrade a still-authenticated legacy visit, or replace its lost capability, without touching invoices. */
+  remember(session: StoredSession): HackathonDemoAccess {
+    const time = this.now().getTime();
+    if (!Number.isFinite(time)) throw new DomainError(503, 'The demo is temporarily unavailable.');
+    return this.store.transaction(() => {
+      if (!this.sessionValid(session)) throw missing();
+      const data = this.record(session.workspace)!;
+      this.view(data.workspace);
+      this.store.assertWriteBudget();
+      const resumeToken = randomBytes(32).toString('base64url');
+      const next: RecordData = {...data, kind: 'quiet-ledger-hackathon-demo-v2', expiresAt: new Date(Date.parse(data.createdAt) + retentionMs).toISOString(), resumeTokenHash: digest(resumeToken).toString('hex')};
+      this.store.db.prepare(`UPDATE ${table} SET expires_at=?,data=? WHERE id=? AND account_id=?`).run(next.expiresAt, this.store.encode(next, table, data.workspace, data.workspace), data.workspace, data.accountId);
+      return {...this.access(next, time), resumeToken};
+    });
+  }
+  private access(data: HackathonDemoVisit, now: number): HackathonDemoAccess {
+    const {accountId, workspace, invoiceId, expiresAt} = data;
+    return {accountId, workspace, invoiceId, expiresAt, sessionExpiresAt: new Date(Math.min(now + sessionTtlMs, Date.parse(expiresAt))).toISOString()};
   }
   private clientBudget(clientId: string, now: number): ClientBudget {
     for (const [key, value] of this.clients) {
@@ -80,7 +133,8 @@ export class HackathonDemo {
     if (!row) return undefined;
     try {
       const data = this.store.decode<RecordData>(row.data, table, workspace, workspace);
-      if (data.kind !== 'quiet-ledger-hackathon-demo-v1' || data.workspace !== workspace || !uuid.test(data.workspace) || !uuid.test(data.accountId) || !uuid.test(data.invoiceId) || data.accountId !== row.account_id || data.expiresAt !== row.expires_at || !Number.isFinite(Date.parse(data.createdAt)) || Date.parse(data.expiresAt) - Date.parse(data.createdAt) !== ttlMs) return undefined;
+      const legacy = data.kind === 'quiet-ledger-hackathon-demo-v1';
+      if ((!legacy && (data.kind !== 'quiet-ledger-hackathon-demo-v2' || typeof data.resumeTokenHash !== 'string' || !tokenHash.test(data.resumeTokenHash))) || data.workspace !== workspace || !uuid.test(data.workspace) || !uuid.test(data.accountId) || !uuid.test(data.invoiceId) || data.accountId !== row.account_id || data.expiresAt !== row.expires_at || !Number.isFinite(Date.parse(data.createdAt)) || Date.parse(data.expiresAt) - Date.parse(data.createdAt) !== (legacy ? sessionTtlMs : retentionMs)) return undefined;
       return data;
     } catch {return undefined;}
   }
@@ -105,10 +159,6 @@ export class HackathonDemo {
     return this.store.transaction(()=>{
       const previous=this.view(workspace),data=this.record(workspace)!;
       if(this.store.listInvoices(workspace).length>=8)throw new DomainError(429,'This demo visit has reached its eight-invoice limit.');
-      if(this.store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='demo_agent_leases'").get()){
-        const row=this.store.db.prepare('SELECT id,data FROM demo_agent_leases WHERE workspace=? AND expires_at>?').get(workspace,this.now().toISOString());
-        if(row){const lease=this.store.decode<{state:string}>(row.data,'demo_agent_leases',String(row.id),workspace);if(!['expired','offline','idle'].includes(lease.state))throw new DomainError(409,'Reset the current demo team before creating a new invoice.');}
-      }
       const invoice=createInvoice(this.store,workspace,body,this.now());
       // Agent snapshots validate every component, not only the discounted total.
       // Keep the whole demo creation transactional so a rejected case leaves no invoice or audit row.
@@ -129,7 +179,7 @@ export class HackathonDemo {
   }
   private cleanupExpired(now: string) {
     const expired = this.store.db.prepare(`SELECT id FROM ${table} WHERE expires_at<=?`).all(now)
-      .map(row => this.record(String(row.id))).filter((data): data is RecordData => Boolean(data));
+      .map(row => this.record(String(row.id))).filter((data): data is RecordData => Boolean(data&&Date.parse(data.createdAt)+retentionMs<=Date.parse(now)));
     if (!expired.length) return;
     const owned = new Map(expired.map(data => [data.workspace, data.accountId]));
     for (const row of this.store.db.prepare('SELECT token_hash,data FROM sessions').all()) {

@@ -8,12 +8,37 @@ async function openRoom(page:Page,name:'Riley'|'Jordan'|'Group'){
  await expect(page.getByText(name==='Riley'?'You and Riley connected':name==='Jordan'?'You and Jordan connected':'You, Riley and Jordan connected',{exact:true})).toBeVisible({timeout:90000});
 }
 async function sendMessage(page:Page,text:string){await page.getByLabel('Message the demo team',{exact:true}).fill(text);await page.getByRole('button',{name:'Send message',exact:true}).click();}
+test.beforeEach(async({context,baseURL},info)=>{if(baseURL!=='http://localhost:4352')return;const client=1+[...info.testId].reduce((sum,character)=>sum+character.charCodeAt(0),0)%200;await context.addCookies([{name:'ql_fixture_client',value:String(client),url:baseURL}]);});
 test.afterEach(async({page,baseURL})=>{
  if(baseURL?.endsWith(':4352')){await page.request.post('/api/hackathon-demo/agents/reset').catch(()=>{});return;}
  if(!process.env.QUIET_LEDGER_TEAM_URL)return;
  await page.evaluate(async()=>{const session=await fetch('/api/session').then(r=>r.json());if(!session.hackathonDemo)return;await fetch('/api/hackathon-demo/agents/reset',{method:'POST',headers:{'content-type':'application/json','x-csrf-token':session.csrfToken},body:'{}'});}).catch(()=>{});
 });
 test('the fictional demo has a browser entry to its client and accountant conversations',async({page})=>{test.skip(Boolean(process.env.QUIET_LEDGER_TEAM_URL),'Covered by the full actual-runtime case.');await enter(page);await expect(page.getByRole('link',{name:'Meet Riley and Jordan',exact:true})).toBeVisible();});
+
+test('conversational browser opens the invoice card and saved demo invoices after sign-out',async({page,baseURL})=>{
+ test.skip(baseURL!=='http://localhost:4352','Isolated fixture only.');
+ await enter(page);const original=await page.request.get('/api/hackathon-demo').then(r=>r.json());
+ await page.goto('/demo/team');await page.getByRole('link',{name:`Open invoice ${original.invoice.number}`,exact:true}).click();
+ await expect(page).toHaveURL(new RegExp('/pay/'+original.checkoutToken+'$'));await expect(page.getByText(original.invoice.title,{exact:true})).toBeVisible();
+ await page.goto('/demo/team');await page.getByRole('button',{name:'Simulate payment',exact:true}).click();await expect(page.getByText('Simulated payment recorded',{exact:true})).toBeVisible();
+ await page.getByRole('link',{name:`Open invoice ${original.invoice.number}`,exact:true}).click();await page.getByRole('link',{name:'View payment receipt',exact:true}).click();await expect(page).toHaveURL(/\/receipt\//);await expect(page.getByText('Simulation receipt',{exact:true})).toBeVisible();
+ await page.goto('/demo');await page.getByRole('button',{name:'Leave workspace',exact:true}).click();await enter(page);
+ await page.getByRole('link',{name:'Demo invoices',exact:true}).click();await expect(page).toHaveURL(/\/demo\/invoices$/);
+ const row=page.getByRole('row').filter({hasText:original.invoice.number});await expect(row).toContainText('Paid · simulation');await row.getByRole('link',{name:original.invoice.customerName,exact:true}).click();await expect(page).toHaveURL(new RegExp('/pay/'+original.checkoutToken+'$'));
+});
+
+test('conversational browser creates another invoice without resetting the active team',async({page,baseURL})=>{
+ test.skip(baseURL!=='http://localhost:4352','Isolated fixture only.');
+ await enter(page);await page.goto('/demo/team');await page.getByRole('button',{name:'Start conversation',exact:true}).click();await expect(page.getByText('You and Riley connected',{exact:true})).toBeVisible();
+ await sendMessage(page,'What does your company do?');await expect(historyFor(page).locator('li')).toHaveCount(2);
+ const previous=await page.request.get('/api/hackathon-demo/agents').then(r=>r.json());
+ await page.getByRole('link',{name:'Create demo invoice',exact:true}).click();await page.getByLabel('Invoice title',{exact:true}).fill('Fictional Marmot editing follow-up');await page.getByLabel('Item 1 unit price',{exact:true}).fill('75');await page.getByRole('button',{name:'Create demo invoice',exact:true}).click();await expect(page).toHaveURL(/\/demo\/team$/);
+ await expect(page.getByText('Fictional Marmot editing follow-up',{exact:true})).toBeVisible();await page.getByRole('button',{name:'Start conversation',exact:true}).click();await expect(page.getByText('You and Riley connected',{exact:true})).toBeVisible();
+ const next=await page.request.get('/api/hackathon-demo/agents').then(r=>r.json());expect(next.leaseId).toBe(previous.leaseId);expect(next.humanPubkey).toBe(previous.humanPubkey);await expect(historyFor(page).locator('li')).toHaveCount(2);
+ await sendMessage(page,'Can we include captions on this next invoice?');await expect(historyFor(page).locator('li')).toHaveCount(4);await openRoom(page,'Jordan');await sendMessage(page,'Please check this new invoice.');await expect(historyFor(page).locator('li')).toHaveCount(2);await openRoom(page,'Group');await sendMessage(page,'Please both review the new work.');await expect(historyFor(page).locator('li')).toHaveCount(3);
+ await page.getByRole('link',{name:'Demo invoices',exact:true}).click();await expect(page.getByRole('row')).toHaveCount(3);await expect(page.getByRole('row').filter({hasText:'Fictional Marmot editing follow-up'})).toHaveCount(1);
+});
 
 test('actual browser, native MDK and Hermes keep direct conversations and ledger authority separate',async({page})=>{
  test.skip(!process.env.QUIET_LEDGER_TEAM_URL,'Requires separately configured actual native MDK and Hermes.');
@@ -26,6 +51,7 @@ test('actual browser, native MDK and Hermes keep direct conversations and ledger
  await send('What does your company do?',/workshop|walkthrough|recording/i);
  await send('I edit videos. How could that help with the workshops you just described?',/video|edit|record|caption|walkthrough/i);
  await expect(history.locator('li')).toHaveCount(4);
+ const activeTeam=await page.request.get('/api/hackathon-demo/agents').then(r=>r.json());await page.goto('/demo/new');await page.getByLabel('Invoice title',{exact:true}).fill('Fictional Marmot recording follow-up');await page.getByLabel('Invoice currency',{exact:true}).selectOption('KRW');await page.getByLabel('Item 1 unit price',{exact:true}).fill('150000');await page.getByLabel('Discount (%)',{exact:true}).fill('10');await page.getByLabel('Premium (%)',{exact:true}).fill('6');await page.getByRole('button',{name:'Create demo invoice',exact:true}).click();await expect(page).toHaveURL(/\/demo\/team$/);await page.getByRole('button',{name:'Start conversation',exact:true}).click();await expect(page.getByText('You and Riley connected',{exact:true})).toBeVisible({timeout:90000});const continuedTeam=await page.request.get('/api/hackathon-demo/agents').then(r=>r.json());expect(continuedTeam.leaseId).toBe(activeTeam.leaseId);expect(continuedTeam.humanPubkey).toBe(activeTeam.humanPubkey);await expect(history.locator('li')).toHaveCount(4);
  await openRoom(page,'Jordan');await expect(history.locator('li')).toHaveCount(0);
  await send('Please check the total and tax on this invoice.',/150,000[\s\S]*15,000[\s\S]*9,000[\s\S]*144,000/);
  if(process.env.QUIET_LEDGER_EXPECT_CODEX==='true'){await expect(page.getByText('Jordan via Codex · Luna Max',{exact:true})).toBeVisible();const details=await page.evaluate(()=>fetch('/api/hackathon-demo/agents').then(r=>r.json()));expect(details.runtime).toBe('mixed');expect(details.providers.accountant).toEqual({runtime:'codex',model:'gpt-6-luna',reasoningEffort:'max'});expect(details.model).toBe('gpt-6-luna');}
@@ -34,9 +60,10 @@ test('actual browser, native MDK and Hermes keep direct conversations and ledger
  await openRoom(page,'Group');await expect(history.locator('li')).toHaveCount(0);await sendMessage(page,'Hello, everyone. What is your role in the workshop team?');await expect(history.locator('li')).toHaveCount(3,{timeout:60000});await expect(history.locator('.team-message-received strong').filter({hasText:/^Riley$/})).toHaveCount(1);await expect(history.locator('.team-message-received strong').filter({hasText:/^Jordan$/})).toHaveCount(1);
  await openRoom(page,'Riley');await expect(history.locator('li')).toHaveCount(4);await expect(history.getByText('Please check the total and tax on this invoice.',{exact:true})).toHaveCount(0);
  await page.reload();await page.getByRole('button',{name:'Start conversation',exact:true}).click();await expect(page.getByText('You and Riley connected',{exact:true})).toBeVisible({timeout:90000});await expect(history.locator('li')).toHaveCount(4);await page.getByRole('button',{name:'Refresh messages',exact:true}).click();await expect(history.locator('li')).toHaveCount(4);
- metrics.journeySeconds=(Date.now()-started)/1000;console.log('Actual native+Hermes conversational timing '+JSON.stringify(metrics));if(process.env.QUIET_LEDGER_TEAM_METRICS)await writeFile(process.env.QUIET_LEDGER_TEAM_METRICS,JSON.stringify(metrics,null,2)+'\n');
  await page.evaluate(()=>window.scrollTo(0,0));if(process.env.QUIET_LEDGER_TEAM_SCREENSHOT)await page.screenshot({path:process.env.QUIET_LEDGER_TEAM_SCREENSHOT,fullPage:true});await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);if(process.env.QUIET_LEDGER_TEAM_MOBILE_SCREENSHOT)await page.screenshot({path:process.env.QUIET_LEDGER_TEAM_MOBILE_SCREENSHOT,fullPage:true});
  await page.getByRole('button',{name:'Reset team',exact:true}).click();await expect(page.getByRole('button',{name:'Start conversation',exact:true})).toBeEnabled();await expect(history.locator('li')).toHaveCount(0);
+ const savedInvoice=await page.request.get('/api/hackathon-demo').then(r=>r.json());await page.getByRole('link',{name:`Open invoice ${savedInvoice.invoice.number}`,exact:true}).click();await expect(page).toHaveURL(new RegExp('/pay/'+savedInvoice.checkoutToken+'$'));await page.getByRole('link',{name:'View payment receipt',exact:true}).click();await expect(page.getByText('Simulation receipt',{exact:true})).toBeVisible();await page.goto('/demo');await page.getByRole('button',{name:'Open navigation',exact:true}).click();await page.getByRole('button',{name:'Leave workspace',exact:true}).click();await enter(page);await page.getByRole('button',{name:'Open navigation',exact:true}).click();await page.getByRole('link',{name:'Demo invoices',exact:true}).click();await expect(page.getByRole('row')).toHaveCount(4);await expect(page.getByRole('row').filter({hasText:savedInvoice.invoice.number})).toContainText('Paid · simulation');const returnedInvoice=await page.request.get('/api/hackathon-demo').then(r=>r.json());expect(returnedInvoice.invoice.id).toBe(savedInvoice.invoice.id);
+ metrics.journeySeconds=(Date.now()-started)/1000;console.log('Actual native+Hermes conversational timing '+JSON.stringify(metrics));if(process.env.QUIET_LEDGER_TEAM_METRICS)await writeFile(process.env.QUIET_LEDGER_TEAM_METRICS,JSON.stringify(metrics,null,2)+'\n');
 });
 test('conversational browser defaults to Riley and keeps direct rooms and explicit group separate',async({page,baseURL})=>{
  test.skip(baseURL!=='http://localhost:4352','Synthetic browser fixture only.');

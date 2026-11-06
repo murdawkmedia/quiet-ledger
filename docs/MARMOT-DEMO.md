@@ -2,7 +2,8 @@
 
 Open the hosted app and choose **Hackathon demo**, then enter the public demo
 password **marmot**. Each visit creates a separate fictional workspace and one
-CAD125 invoice. Visits expire after two hours. Only test accounts/data belong
+CAD125 invoice. Demo records stay for 30 days; sign-ins expire after two hours and can reopen the
+same workspace using its private browser cookie. Only test accounts/data belong
 in agent-led acceptance.
 
 Choose **Prepare demo** to create two independent messaging identities in the
@@ -70,11 +71,12 @@ stored demo rows while denying their sessions and public links. Existing
 private account authentication remains passkey/Nostr; the public password
 never authenticates a real account.
 
-The service permits at most 32 active visits, 8 starts/client/hour and 5 failed
+The service permits at most 256 saved visits, 8 starts/client/hour and 5 failed
 password attempts/client/10 minutes. Client counters are process-local and
-reset on restart; the global active-workspace cap persists. The next successful
-start removes only registered expired demo workspaces and their dependent
-records. There is no background cleanup or per-device IndexedDB expiration.
+reset on restart; the global saved-workspace cap persists. The next successful
+start removes registered demo workspaces after their 30-day retention deadline
+and their dependent records. Expired legacy visits remain inaccessible while
+their encrypted records are kept for that same recovery window. There is no background cleanup or per-device IndexedDB expiration.
 Demo sessions cannot create/change provider connections, account credentials,
 API keys or payouts. Their dedicated bounded invoice editor can create up to
 eight fictional invoices per visit and save fictional client templates; private

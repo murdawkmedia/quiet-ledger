@@ -1,7 +1,7 @@
 # The Marmot demo team
 
 Open Quiet Ledger, choose **Hackathon demo**, enter **marmot**, then open the demo
-conversation and choose **Start the demo team**. No wallet, signer extension,
+conversation and choose **Start conversation**. No wallet, signer extension,
 White Noise or other app is required. Use fictional information only.
 
 You are the merchant. Riley produces hands-on private-messaging workshops for
@@ -28,7 +28,7 @@ fictional company. Group messages normally reach both; an explicit human-written
 
 ## A short presentation
 
-1. Choose **New demo invoice**. Pick a reusable client template, issue/due dates,
+1. Choose **Create a demo invoice**. Pick a reusable client template, issue/due dates,
    CAD, USD or KRW, optional discount/premium and accepted methods, then save.
 2. Start Riley's conversation. Ask what the company does and how your filming,
    editing, website or workflow services could help. Continue with a follow-up.
@@ -43,11 +43,33 @@ appear visibly; there is no scripted failure response or paid-provider fallback.
 
 Pause/resume controls the whole team's inference. Reset retires all its rooms and
 starts new keys on the next start; it cannot erase copies already held by members.
-One team can be active per instance for ten minutes, within the visit's two-hour
-lifetime. Twelve human rounds are shared across all three rooms; eight starts per
-visit limit repeated provisioning. A busy instance offers the existing manual
+One team can be active per instance for ten minutes. Twelve human rounds are
+shared across all three rooms; eight starts per saved demo limit repeated
+provisioning. Reset starts fresh chats without removing saved invoices. An
+undelivered reply stays queued in its original room and does not stop that agent
+replying in another room; active model calls remain serialized per agent. A busy instance offers the existing manual
 invoice conversation while another visitor uses the team. A legacy three-member
 room stays a group; upgrading never silently labels it a private conversation.
+
+## Saved demo invoices
+
+Demo invoices, templates and simulated receipts stay in a separate workspace for
+30 days from its creation. Sign-ins last two hours. A private HttpOnly browser
+cookie lets the same browser reopen that workspace after signing in again with
+`marmot`; the public password alone cannot open another visitor's records.
+Clearing cookies or using a different browser loses that demo access. Only the
+capability hash is kept in the encrypted database record. Up to 256 saved visits
+and eight invoices per visit are supported; unexpired visits are not evicted.
+
+Create another invoice while the team is active. The same messaging identities
+and rooms remain connected to this demo, and invoice questions use the newly
+created invoice. Earlier invoices and receipts remain in **Demo invoices**.
+Click a client name or the current conversation's invoice card to open its
+customer checkout, then open the payment receipt when payment is simulated.
+
+The separate **Prepare demo** button in the two-participant walkthrough opens
+an encrypted merchant/customer conversation in this browser. It does not prepare,
+issue or send an invoice. It does not start the Riley/Jordan agent team.
 
 ## What actually runs
 

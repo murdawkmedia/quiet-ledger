@@ -25,7 +25,8 @@ test('public demo password creates distinct fictional visits with no real accoun
     assert.notEqual(a.accountId, b.accountId);
     assert.notEqual(a.workspace, b.workspace);
     assert.notEqual(a.invoiceId, b.invoiceId);
-    assert.equal(a.expiresAt, '2026-11-05T14:00:00.000Z');
+    assert.equal(a.expiresAt, '2026-12-05T12:00:00.000Z');
+    assert.equal(a.sessionExpiresAt, '2026-11-05T14:00:00.000Z');
     assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE name='auth_accounts'").get()!.n, 0);
     const view = f.demo.view(a.workspace);
     assert.equal(view.invoice.id, a.invoiceId);
@@ -42,7 +43,7 @@ test('visit membership and session expiry gate every demo read and mutation', ()
   const f = setup();
   try {
     const a = f.demo.start('marmot', 'fictional-client');
-    const session = {role: 'demo', accountId: a.accountId, workspace: a.workspace, hackathonDemo: true, csrf: 'fictional-csrf', expires: a.expiresAt} satisfies StoredSession & {hackathonDemo: boolean};
+    const session = {role: 'demo', accountId: a.accountId, workspace: a.workspace, hackathonDemo: true, csrf: 'fictional-csrf', expires: a.sessionExpiresAt} satisfies StoredSession & {hackathonDemo: boolean};
     assert.equal(f.demo.hasWorkspace(a.workspace), true);
     assert.equal(f.demo.sessionValid(session), true);
     assert.equal(f.demo.sessionValid({...session, role: 'owner'}), false);
@@ -53,6 +54,9 @@ test('visit membership and session expiry gate every demo read and mutation', ()
     assert.throws(() => f.demo.view('owner'), status(404));
     assert.throws(() => f.demo.simulatePayment('demo'), status(404));
     f.advance(2 * 60 * 60 * 1000);
+    assert.equal(f.demo.sessionValid(session), false);
+    assert.equal(f.demo.hasWorkspace(a.workspace), true);
+    f.advance((30 * 24 - 2) * 60 * 60 * 1000);
     assert.equal(f.demo.hasWorkspace(a.workspace), false);
     assert.equal(f.demo.sessionValid({...session, expires: '2026-11-06T12:00:00.000Z'}), false);
     assert.throws(() => f.demo.view(a.workspace), status(404));
@@ -107,7 +111,7 @@ test('global visit capacity persists across service instances and expiry reclaim
   const f = setup();
   try {
     const real = createInvoice(f.store, 'real-fictional-account', {customerName: 'Unrelated fictional business', title: 'Preserve this existing invoice', currency: 'CAD', items: [{description: 'Synthetic work', quantity: 1, unitAmount: 100}]}, initialTime);
-    const visits = Array.from({length: 32}, (_, i) => f.demo.start('marmot', `fictional-client-${i}`));
+    const visits = Array.from({length: 256}, (_, i) => f.demo.start('marmot', `fictional-client-${i}`));
     const a = visits[0];
     f.demo.simulatePayment(a.workspace);
     f.store.saveSession('expired-demo-session', {role: 'demo', workspace: a.workspace, accountId: a.accountId, hackathonDemo: true, csrf: 'fictional-demo', expires: a.expiresAt} as StoredSession);
@@ -118,7 +122,7 @@ test('global visit capacity persists across service instances and expiry reclaim
     assert.throws(() => f.demo.start('marmot', 'capacity-client'), status(503));
     const restarted = new HackathonDemo({store: f.store, now: () => initialTime});
     assert.throws(() => restarted.start('marmot', 'capacity-client'), status(503));
-    f.advance(2 * 60 * 60 * 1000);
+    f.advance(30 * 24 * 60 * 60 * 1000);
     const fresh = f.demo.start('marmot', 'fresh-client');
     assert.equal(f.demo.hasWorkspace(fresh.workspace), true);
     assert.equal(f.store.db.prepare('SELECT COUNT(*) AS n FROM hackathon_demo_workspaces').get()!.n, 1);
@@ -167,7 +171,7 @@ test('expiry cleanup respects Marmot foreign keys and leaves other conversation 
     f.store.db.prepare('INSERT INTO receiving_requests VALUES(?,?,?,?)').run('demo-receiving', visit.workspace, visit.invoiceId, f.store.encode({fictional: true}, 'receiving_requests', 'demo-receiving', visit.workspace));
     f.store.revokeInvoiceLinks(visit.invoiceId, visit.workspace, initialTime.toISOString());
     const original = JSON.stringify(f.store.db.prepare('SELECT * FROM marmot_events WHERE workspace=?').all('real-fictional-account'));
-    f.advance(2 * 60 * 60 * 1000);
+    f.advance(30 * 24 * 60 * 60 * 1000);
     f.demo.start('marmot', 'fresh-client');
     assert.equal(f.store.db.prepare('SELECT COUNT(*) AS n FROM marmot_conversations WHERE workspace=?').get(visit.workspace)!.n, 0);
     assert.equal(f.store.db.prepare('SELECT COUNT(*) AS n FROM marmot_events WHERE workspace=?').get(visit.workspace)!.n, 0);
@@ -230,7 +234,7 @@ test('cleanup skips malformed unrelated session payloads without deleting or blo
     const id = hash('fictional-malformed-unrelated-session');
     const data = f.store.encode(null, 'sessions', id);
     f.store.db.prepare('INSERT INTO sessions(token_hash,data) VALUES(?,?)').run(id, data);
-    f.advance(2 * 60 * 60 * 1000);
+    f.advance(30 * 24 * 60 * 60 * 1000);
     assert.doesNotThrow(() => f.demo.start('marmot', 'fresh-client'));
     assert.equal(f.store.db.prepare('SELECT data FROM sessions WHERE token_hash=?').get(id)!.data, data);
   } finally {f.store.close();}

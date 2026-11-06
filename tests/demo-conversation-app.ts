@@ -36,7 +36,7 @@ app.post('/fixture/publish',express.json(),(req,res)=>{rejectPublish=req.body.re
 app.post('/fixture/providers',express.json(),(_req,res)=>{providers={client:{runtime:'hermes',model:'fictional-hermes'},accountant:{runtime:'codex',model:'gpt-6-luna',reasoningEffort:'max'}};res.json({providers});});
 const proxySecret='fictional-conversation-browser-proxy-at-least32-bytes';
 const ledger=createApp({dbPath:join(directory,'fictional.sqlite'),ownerToken:'fictional-unused-owner',encryptionKey:Buffer.alloc(32,57),hosted:{publicOrigin:origin,proxySecret,allowInsecureLoopback:true,hackathonDemo:true},simulationOnly:true});
-app.use((req,_res,next)=>{req.headers['x-quiet-ledger-proxy']=proxySecret;req.headers['x-quiet-ledger-client-ip']='127.0.0.1';next();});app.use(ledger);
+app.use((req,_res,next)=>{const client=Number(req.headers.cookie?.match(/(?:^|;\s*)ql_fixture_client=([1-9]\d{0,2})(?:;|$)/)?.[1]);req.headers['x-quiet-ledger-proxy']=proxySecret;req.headers['x-quiet-ledger-client-ip']=Number.isInteger(client)&&client>0&&client<255?`198.51.100.${client}`:'127.0.0.1';next();});app.use(ledger);
 const vite=await createViteServer({configFile:resolve('vite.config.ts'),server:{middlewareMode:true,hmr:false},appType:'custom'});
 app.use(vite.middlewares);app.get('/{*path}',async(req,res,next)=>{try{res.type('html').send(await vite.transformIndexHtml(req.originalUrl,readFileSync(resolve('client/index.html'),'utf8')));}catch(error){next(error);}});
 const server=createServer(app),wss=new WebSocketServer({server,path:new URL(relay).pathname});let processing=Promise.resolve();const seen=new Set<string>();

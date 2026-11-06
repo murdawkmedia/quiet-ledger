@@ -178,37 +178,54 @@ test('template updates and deletion preserve issued invoices and the other works
   } finally {store.close();}
 });
 
-test('demo invoice replacement is blocked throughout an active team lease and allowed after expiry', () => {
+test('new demo invoices preserve a ready team, historical receipts and trusted case versions', () => {
   const store = new Store(':memory:', {encryptionKey: Buffer.alloc(32, 63)});
   let clock = now;
   try {
     const demo = new HackathonDemo({store, now: () => clock});
     const visit = demo.start('marmot', 'fictional-lease-client');
+    const paid = demo.simulatePayment(visit.workspace);
+    const previousInvoiceBytes = store.db.prepare('SELECT data FROM invoices WHERE id=?').get(visit.invoiceId)!.data;
+    const previousReceiptBytes = JSON.stringify(store.db.prepare('SELECT * FROM receipts').all());
     const snapshot = (workspace: string): DemoCase => {
       const {invoice, caseVersion} = demo.view(workspace);
-      return {fictional: true, currency: invoice.currency, lineAmount: invoice.subtotal, tax: invoice.tax, total: invoice.total, status: invoice.status, settlementMode: 'simulation', receiptRecorded: false, version: caseVersion, asOf: clock.toISOString()};
+      return {fictional: true, currency: invoice.currency, lineAmount: invoice.subtotal, tax: invoice.tax, total: invoice.total, status: invoice.status, settlementMode: 'simulation', receiptRecorded: Boolean(invoice.receiptToken), version: caseVersion, asOf: clock.toISOString()};
     };
     const admission = new DemoAgentAdmission({store, now: () => clock, getCase: snapshot});
     const lease = admission.start(visit.workspace, 'a'.repeat(64), visit.expiresAt);
-    const assertBlocked = () => {
-      assert.throws(() => demo.create(visit.workspace, draft), status(409));
-      assert.equal(store.listInvoices(visit.workspace).length, 1);
-      assert.equal(demo.view(visit.workspace).invoice.id, visit.invoiceId);
-      assert.equal(demo.view(visit.workspace).caseVersion, 1);
-    };
-    assertBlocked();
     admission.setMembers(lease.id, [{role: 'client', name: 'Riley', pubkey: 'b'.repeat(64)}, {role: 'accountant', name: 'Jordan', pubkey: 'c'.repeat(64)}]);
-    assertBlocked();
     admission.connect(visit.workspace, 'd'.repeat(64), 'e'.repeat(64));
-    assertBlocked();
-    admission.pause(visit.workspace);
-    assertBlocked();
-    clock = new Date(now.getTime() + 10 * 60 * 1000);
+    const pending = admission.claim(lease.id, 'accountant', 'f'.repeat(64), lease.humanPubkey, lease.generation)!;
+    assert.ok(pending);
+    const active = admission.get(visit.workspace)!;
+    const leaseBytes = store.db.prepare('SELECT data FROM demo_agent_leases WHERE id=?').get(lease.id)!.data;
+    assert.equal(active.state, 'ready');
     const replacement = demo.create(visit.workspace, {...draft, currency: 'GBP' as Currency});
-    assert.equal(replacement.caseVersion, 2);
+    assert.equal(replacement.caseVersion, paid.caseVersion + 1);
     assert.notEqual(replacement.invoice.id, visit.invoiceId);
     assert.equal(replacement.invoice.settlementMode, 'simulation');
-    assert.equal(admission.get(visit.workspace)?.state, 'expired');
+    assert.deepEqual(admission.get(visit.workspace), active);
+    assert.equal(store.db.prepare('SELECT data FROM demo_agent_leases WHERE id=?').get(lease.id)!.data, leaseBytes);
+    assert.equal(store.db.prepare('SELECT data FROM invoices WHERE id=?').get(visit.invoiceId)!.data, previousInvoiceBytes);
+    assert.equal(JSON.stringify(store.db.prepare('SELECT * FROM receipts').all()), previousReceiptBytes);
+    assert.equal(store.getReceipt(paid.invoice.receiptToken!)?.receipt.mode, 'simulation');
+    assert.equal(store.listInvoices(visit.workspace).length, 2);
+
+    admission.saveInference(pending, {intent: 'check-total', model: 'fictional-model', runtime: 'hermes'});
+    const reply = admission.prepareReply(pending)!;
+    assert.equal(reply.caseVersion, replacement.caseVersion);
+    assert.match(reply.text, /GBP 105\.01/);
+    const next = demo.create(visit.workspace, {...draft, currency: 'USD' as Currency});
+    assert.equal(next.caseVersion, replacement.caseVersion + 1);
+    assert.deepEqual(admission.prepareReply(pending), reply);
+
+    const names = ['invoices', 'receipts', 'audits', 'hackathon_demo_workspaces', 'demo_agent_leases', 'demo_agent_turns'];
+    const rows = () => names.map(name => JSON.stringify(store.db.prepare(`SELECT * FROM ${name}`).all()));
+    const beforeFailure = rows();
+    assert.throws(() => demo.create(visit.workspace, {...draft, taxBps: 0, discountBps: 5000, items: [{description: 'Oversized fictional invoice', quantity: 2, unitAmount: 1000000000}]}), status(400));
+    assert.deepEqual(rows(), beforeFailure);
+    assert.equal(demo.view(visit.workspace).caseVersion, next.caseVersion);
+    assert.equal(admission.get(visit.workspace)?.state, 'ready');
   } finally {store.close();}
 });
 

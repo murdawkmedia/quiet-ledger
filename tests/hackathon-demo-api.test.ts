@@ -58,7 +58,7 @@ test('hosted demo is opt-in and sign-in enforces trusted transport, origin, stri
   } finally {f.close();}
 });
 
-test('demo view, simulation and public checkout stay isolated and expire together', async () => {
+test('demo sign-in expires before saved fictional checkout and receipt links', async () => {
   const f = setup();
   try {
     assert.equal((await f.get('/api/hackathon-demo')).status, 401);
@@ -84,9 +84,89 @@ test('demo view, simulation and public checkout stay isolated and expire togethe
     f.advance(2 * 60 * 60 * 1000);
     assert.equal((await f.get('/api/session', a.headers)).body.authenticated, false);
     assert.equal((await f.get('/api/hackathon-demo', a.headers)).status, 401);
+    assert.equal((await f.get('/api/checkout/' + view.body.checkoutToken)).status, 200);
+    assert.equal((await f.get('/api/receipts/' + paid.body.invoice.receiptToken)).status, 200);
+    f.advance(29 * 24 * 60 * 60 * 1000 + 22 * 60 * 60 * 1000);
     assert.equal((await f.get('/api/checkout/' + view.body.checkoutToken)).status, 404);
     assert.equal((await f.get('/api/receipts/' + paid.body.invoice.receiptToken)).status, 404);
   } finally {f.close();}
+});
+
+test('browser demo capability survives sign-out and restores saved invoices without account signup', async () => {
+  const f=setup();
+  try {
+    const a=await f.login();
+    const cookies=a.response.headers['set-cookie'] as unknown as string[];
+    const resume=cookies.find(row=>row.startsWith('ql_demo_resume='));
+    assert.ok(resume,'A returning browser needs a separate persistent capability.');
+    assert.match(resume,/Max-Age=2592000/);assert.match(resume,/HttpOnly/);assert.match(resume,/Secure/);assert.match(resume,/SameSite=Strict/);
+    assert.equal(a.response.body.resumeToken,undefined);
+    const before=(await f.get('/api/hackathon-demo',a.headers)).body;
+    const paid=await f.post('/api/hackathon-demo/simulate-payment',{},a.headers);assert.equal(paid.status,200);
+    const saved=(await f.get('/api/dashboard',a.headers)).body.invoices;
+    const leave=await request(f.app).delete('/api/session').set({...baseHeaders,...a.headers});assert.equal(leave.status,200);
+    assert.ok(!(leave.headers['set-cookie'] as unknown as string[]).some(row=>row.startsWith('ql_demo_resume=')));
+    const resumeCookie=resume.split(';')[0];
+    assert.equal((await f.get('/api/hackathon-demo',{Cookie:resumeCookie})).status,401);
+    assert.equal((await f.post('/api/session/hackathon-demo',{password:'wrong'},{Cookie:resumeCookie})).status,401);
+    f.advance(3*60*60*1000);
+    const back=await f.post('/api/session/hackathon-demo',{password:'marmot'},{Cookie:resumeCookie});assert.equal(back.status,200);
+    assert.equal(back.body.accountId,a.response.body.accountId);
+    const headers={Cookie:String(back.headers['set-cookie'][0]).split(';')[0],'X-CSRF-Token':back.body.csrfToken};
+    const after=(await f.get('/api/hackathon-demo',headers)).body;
+    assert.equal(after.invoice.id,before.invoice.id);assert.equal(after.invoice.receiptToken,paid.body.invoice.receiptToken);assert.equal(after.invoice.status,'paid');
+    assert.deepEqual((await f.get('/api/dashboard',headers)).body.invoices,saved);
+    assert.equal(f.store.db.prepare('SELECT COUNT(*) AS n FROM auth_accounts').get()!.n,0);
+    const other=await f.login('203.0.113.12');assert.notEqual(other.response.body.accountId,back.body.accountId);assert.equal((await f.get('/api/invoices/'+before.invoice.id,other.headers)).status,404);
+  } finally {f.close();}
+});
+
+test('valid current legacy demo sign-in is remembered without changing its financial records',async()=>{
+  const f=setup();
+  try{
+    const a=await f.login(),value=a.headers.Cookie.slice('ql_session='.length),session=f.store.session(value)!;
+    const row=f.store.db.prepare('SELECT data FROM hackathon_demo_workspaces WHERE id=?').get(session.workspace)!;
+    const data=f.store.decode<Record<string,unknown>>(row.data,'hackathon_demo_workspaces',session.workspace,session.workspace);
+    data.kind='quiet-ledger-hackathon-demo-v1';data.expiresAt=session.expires;delete data.resumeTokenHash;
+    f.store.db.prepare('UPDATE hackathon_demo_workspaces SET expires_at=?,data=? WHERE id=?').run(session.expires,f.store.encode(data,'hackathon_demo_workspaces',session.workspace,session.workspace),session.workspace);
+    const financial=JSON.stringify(f.store.db.prepare('SELECT * FROM invoices WHERE workspace=?').all(session.workspace));
+    const restored=await f.get('/api/session',a.headers);assert.equal(restored.body.authenticated,true);
+    const cookie=(restored.headers['set-cookie'] as unknown as string[]|undefined)?.find(row=>row.startsWith('ql_demo_resume='));assert.ok(cookie);
+    assert.equal(JSON.stringify(f.store.db.prepare('SELECT * FROM invoices WHERE workspace=?').all(session.workspace)),financial);
+    f.advance(3*60*60*1000);
+    const back=await f.post('/api/session/hackathon-demo',{password:'marmot'},{Cookie:cookie.split(';')[0]});assert.equal(back.status,200);assert.equal(back.body.accountId,session.accountId);
+    assert.equal(f.store.db.prepare('SELECT COUNT(*) AS n FROM invoices WHERE workspace=?').get(session.workspace)!.n,1);
+  }finally{f.close();}
+});
+
+test('new demo visits retain expired legacy financial rows for the longer recovery window',async()=>{
+  const f=setup();
+  try{
+    const a=await f.login(),session=f.store.session(a.headers.Cookie.slice('ql_session='.length))!;
+    const row=f.store.db.prepare('SELECT data FROM hackathon_demo_workspaces WHERE id=?').get(session.workspace)!;
+    const data=f.store.decode<Record<string,unknown>>(row.data,'hackathon_demo_workspaces',session.workspace,session.workspace);
+    data.kind='quiet-ledger-hackathon-demo-v1';data.expiresAt=session.expires;delete data.resumeTokenHash;
+    f.store.db.prepare('UPDATE hackathon_demo_workspaces SET expires_at=?,data=? WHERE id=?').run(session.expires,f.store.encode(data,'hackathon_demo_workspaces',session.workspace,session.workspace),session.workspace);
+    const invoices=JSON.stringify(f.store.db.prepare('SELECT * FROM invoices WHERE workspace=?').all(session.workspace));
+    f.advance(3*60*60*1000);await f.login('203.0.113.12');
+    assert.equal((await f.get('/api/session',a.headers)).body.authenticated,false);
+    assert.equal(JSON.stringify(f.store.db.prepare('SELECT * FROM invoices WHERE workspace=?').all(session.workspace)),invoices);
+    assert.ok(f.store.db.prepare('SELECT 1 FROM hackathon_demo_workspaces WHERE id=?').get(session.workspace));
+  }finally{f.close();}
+});
+
+test('returning demos prune only expired validated demo sessions and retain saved financial records',async()=>{
+ const f=setup();
+ try{
+  const a=await f.login(),resume=(a.response.headers['set-cookie'] as unknown as string[]).find(row=>row.startsWith('ql_demo_resume='))!.split(';')[0];
+  const original=f.store.session(a.headers.Cookie.slice('ql_session='.length))!,financial=JSON.stringify(f.store.db.prepare('SELECT * FROM invoices').all());
+  f.store.saveSession('fictional-expired-owner',{role:'owner',workspace:'fictional-existing-owner',csrf:'fictional',expires:initialTime.toISOString()});
+  f.store.saveSession('fictional-mismatched-demo',{...original,accountId:randomUUID(),expires:initialTime.toISOString()});
+  for(let i=0;i<3;i++){f.advance(3*60*60*1000);const result=await f.post('/api/session/hackathon-demo',{password:'marmot'},{Cookie:resume});assert.equal(result.status,200);assert.equal(result.body.accountId,a.response.body.accountId);}
+  assert.equal(f.store.db.prepare('SELECT COUNT(*) AS n FROM sessions').get()!.n,3);
+  assert.ok(f.store.session('fictional-expired-owner'));assert.ok(f.store.session('fictional-mismatched-demo'));
+  assert.equal(JSON.stringify(f.store.db.prepare('SELECT * FROM invoices').all()),financial);
+ }finally{f.close();}
 });
 
 test('demo sessions cannot mutate financial records, providers, API keys or account credentials', async () => {

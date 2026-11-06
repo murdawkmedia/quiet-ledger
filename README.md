@@ -7,6 +7,12 @@ This is an experimental application. It is suitable for fictional demonstrations
 and evaluation. A provider being listed or connected does not establish funded
 payment acceptance. Outgoing conversions and payouts remain simulated.
 
+Demo invoices and templates stay saved for 30 days in the same browser's separate
+workspace. Sign back in with `marmot` to continue. Create another invoice while
+the team is active, use **Demo invoices** to reopen earlier checkouts, and click
+the current invoice card to view its checkout and receipt. Agent chats have a
+separate ten-minute allowance; resetting them keeps invoices.
+
 ## Source and mirrors
 
 Development is maintained through ngit and GitWorkshop. This GitHub repository
