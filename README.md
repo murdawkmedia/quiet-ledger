@@ -54,6 +54,12 @@ installation with `--demo`; its public demo password is `marmot`. Real and
 fictional workspaces stay separate. The optional agent demo additionally requires
 its pinned private Hermes worker and native Marmot runtime.
 
+## Nut November
+
+See the [November Cashu build plan and current limits](docs/NUT-NOVEMBER.md).
+The entry is work in progress; genuine ecash receiving and redemption are not
+implemented in the registration baseline.
+
 ## Features and boundaries
 
 - Private passkey/Nostr accounts, encrypted record payloads, scoped API and MCP.
