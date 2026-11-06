@@ -67,6 +67,8 @@ receiving and redemption remain unimplemented.
 - [Saved clients and invoice templates](docs/INVOICES.md), billing details captured
   at issue time, invoice/receipt printing, CAD/USD/KRW/EUR/GBP, discounts, premiums,
   accepted-method controls and private checkout links.
+- [Payment terms and repeat work](docs/BUSINESS-TOOLS.md): Net30/60/90/custom
+  calendar-day terms, manual recurring drafts, owner statements and CSV preview.
 - [Deposits and invoice balances](docs/INVOICE-LEDGER.md), separate installment
   receipts, credits, unpaid voids and exact currency CSV exports. Dashboard and
   Records report balances by invoice currency, with live/simulation rows separate.

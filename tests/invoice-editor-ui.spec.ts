@@ -163,7 +163,8 @@ test('empty payment selections fail locally and invoice retries reuse the same r
   });
   await page.getByRole('button',{name:'Create invoice',exact:true}).click();
   await expect(page.getByRole('alert')).toBeVisible();
-  await page.getByRole('button',{name:'Create invoice',exact:true}).click();
+  await expect(page.getByLabel('Invoice title',{exact:true})).toBeDisabled();
+  await page.getByRole('button',{name:'Retry saved invoice',exact:true}).click();
   await expect(page.locator('body')).toHaveAttribute('data-created','true');
   expect(attempts).toHaveLength(2);
   expect(attempts[0].key).toBeTruthy();

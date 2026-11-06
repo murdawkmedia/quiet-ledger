@@ -275,3 +275,11 @@ HTTP endpoints: GET `/invoices/:id/ledger` uses invoices:read; POST
 `/invoice-ledger/export.csv` is a bulk attachment requiring records:read.
 The existing v1 prefix, tenant isolation, CSRF for cookies and write idempotency
 remain. See [invoice ledger](INVOICE-LEDGER.md).
+
+
+Invoice creation accepts optional `paymentTermDays` (integer0..3650 calendar days
+after issue;0means due on receipt) and `paymentTerms` (plain client-facing text,
+max2000characters). The server computes dueDate and rejects inconsistent explicit
+dates. Invoice readback includes those fields without checkout/receipt tokens.
+Recurring drafts and statement/CSV preview remain owner-browser tools; they are
+not new MCP authority or automatic sending/charging operations.

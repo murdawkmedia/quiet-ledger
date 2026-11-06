@@ -26,6 +26,8 @@ import type {ReceivingAdapter} from '../shared/receiving.js';
 import {ReceivingService,type QuoteReceiving} from './receiving-service.js';
 import {InvoiceLedger} from './invoice-ledger.js';
 import {invoiceLedgerRouter} from './invoice-ledger-router.js';
+import {recurringDraftsRouter} from './recurring-drafts-router.js';
+import {businessRecordsRouter} from './business-records-router.js';
 import {summarizeInvoiceBalances,CAD_REFERENCE_VALUATION} from '../shared/currency-report.js';
 import {quoteReceiving} from './receiving-quote.js';
 import {inspectCollateral,type CollateralConfig} from '../integrations/collateral.js';
@@ -417,6 +419,8 @@ export function createApp(options: AppOptions) {
     let before=Number.MAX_SAFE_INTEGER;if(req.query.cursor!==undefined){const cursor=String(req.query.cursor),decoded=Buffer.from(cursor,'base64url').toString();if(!/^[1-9]\d*$/.test(decoded)||Buffer.from(decoded).toString('base64url')!==cursor)throw new DomainError(400,'Invalid list cursor.');before=Number(decoded);if(!Number.isSafeInteger(before))throw new DomainError(400,'Invalid list cursor.');}return {limit,before};
   }
   app.use('/api',invoiceLedgerRouter(store,invoiceLedger,now));
+  app.use('/api',recurringDraftsRouter(store,now));
+  app.use('/api/business-records',businessRecordsRouter(store,invoiceLedger));
   app.get('/api/invoices', (req, res) => {
     const workspace=(res.locals.session as StoredSession).workspace;
     if(!res.locals.apiAccess)return res.json({invoices:store.listInvoices(workspace).map(invoice=>invoiceLedger.withBalance(invoice,workspace))});

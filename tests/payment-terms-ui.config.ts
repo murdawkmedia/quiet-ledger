@@ -1,0 +1,3 @@
+import {defineConfig} from '@playwright/test';
+import {resolve} from 'node:path';
+export default defineConfig({testDir:'.',testMatch:'payment-terms-ui.spec.ts',workers:1,timeout:20000,expect:{timeout:4000},outputDir:'.runtime/payment-terms-ui-results',reporter:[['list']],use:{baseURL:'http://127.0.0.1:4349',browserName:'chromium',headless:true,timezoneId:'America/Edmonton',launchOptions:{executablePath:'/usr/bin/chromium'}},webServer:{command:'node --import tsx tests/payment-terms-ui-app.ts',cwd:resolve(import.meta.dirname,'..'),url:'http://127.0.0.1:4349/tests/fixtures/payment-terms-ui.html',reuseExistingServer:false}});

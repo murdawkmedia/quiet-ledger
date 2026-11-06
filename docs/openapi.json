@@ -2564,6 +2564,17 @@
             "maxItems": 29,
             "uniqueItems": true,
             "description": "Optional nonempty payment-method allowlist. Omitted legacy invoices allow all methods. Square/card and bank_transfer/bank aliases match."
+          },
+          "paymentTermDays": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3650,
+            "description": "Calendar days after issue. Server computes dueDate;0is due on receipt."
+          },
+          "paymentTerms": {
+            "type": "string",
+            "maxLength": 2000,
+            "description": "Client-facing plain-text payment terms, separate from owner note."
           }
         },
         "required": [
@@ -2784,6 +2795,17 @@
           },
           "balance": {
             "$ref": "#/components/schemas/InvoiceBalance"
+          },
+          "paymentTermDays": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3650,
+            "description": "Calendar days after issue. Server computes dueDate;0is due on receipt."
+          },
+          "paymentTerms": {
+            "type": "string",
+            "maxLength": 2000,
+            "description": "Client-facing plain-text payment terms, separate from owner note."
           }
         },
         "required": [

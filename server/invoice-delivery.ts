@@ -129,7 +129,7 @@ export class InvoiceDelivery {
   if(to.length+cc.length>5)throw new DomainError(400,'Choose at most five recipients including your self-copy.');
   const checkoutUrl=new URL('/pay/'+encodeURIComponent(invoice.token),this.origin).href;
   const subject=header(`Invoice ${invoice.number} · ${invoice.title}`),amount=new Intl.NumberFormat('en-CA',{style:'currency',currency:invoice.currency}).format(invoice.total/(invoice.currency==='KRW'?1:100));
-  const text=[`Hello ${invoice.customerName},`,'',`Invoice ${invoice.number}: ${invoice.title}`,`Total: ${amount} ${invoice.currency}`,...(invoice.dueDate?[`Due: ${invoice.dueDate}`]:[]),'',...(input.message?.trim()?[input.message.trim(),'']:[]),'View the invoice and payment options:',checkoutUrl,'','This link gives access to this invoice. Share it only with the intended recipient.'].join('\n');
+  const text=[`Hello ${invoice.customerName},`,'',`Invoice ${invoice.number}: ${invoice.title}`,`Total: ${amount} ${invoice.currency}`,...(invoice.dueDate?[`Due: ${invoice.dueDate}`]:[]),...(invoice.paymentTerms?['',`Payment terms: ${invoice.paymentTerms}`]:[]),'',...(input.message?.trim()?[input.message.trim(),'']:[]),'View the invoice and payment options:',checkoutUrl,'','This link gives access to this invoice. Share it only with the intended recipient.'].join('\n');
   return {state:input.action==='preview'?'preview':'draft_ready',to,cc,subject,text,checkoutUrl,...(settings.senderEmail?{senderEmail:settings.senderEmail}:{})};
  }
  compose(workspace:string,id:string,body:unknown,key:string|undefined,context:{demo:boolean}):{status:number;body:InvoiceEmailResult}{

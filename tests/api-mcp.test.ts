@@ -211,9 +211,9 @@ test('MCP stdio process communicates with SDK Client against a synthetic authent
 
 test('MCP invoice tools preserve KRW dates adjustments and allowed methods without leaking checkout tokens',async()=>{
  let sent:Record<string,unknown>|undefined;
- const args={customerName:'Fictional marmot client',title:'Workshop',currency:'KRW',items:[{description:'Capture',quantity:1,unitAmount:150000}],issueDate:'2026-11-05',dueDate:'2026-12-05',discountBps:500,premiumBps:100,acceptedMethods:['bitcoin','lightning']};
+ const args={customerName:'Fictional marmot client',title:'Workshop',currency:'KRW',items:[{description:'Capture',quantity:1,unitAmount:150000}],issueDate:'2026-11-05',dueDate:'2026-12-05',paymentTermDays:30,paymentTerms:'Fictional custom payment terms.',discountBps:500,premiumBps:100,acceptedMethods:['bitcoin','lightning']};
  const api=new LedgerApiClient({token,fetcher:async(_input,init)=>{sent=JSON.parse(String(init?.body));return Response.json({...invoice,...sent,discountAmount:7500,premiumAmount:1500,total:144000});}}),p=await protocol(api);
- try{const result=await p.client.callTool({name:'create_invoice',arguments:{...args,idempotencyKey:'fictional_marmot_krw'}});assert.notEqual(result.isError,true);assert.deepEqual(sent,args);const saved=(result.structuredContent as any).invoice;for(const field of ['issueDate','dueDate','discountBps','premiumBps','acceptedMethods'])assert.deepEqual(saved[field],(args as any)[field]);assert.equal(saved.discountAmount,7500);assert.equal(saved.premiumAmount,1500);assert.equal(saved.token,undefined);}finally{await p.close();}
+ try{const result=await p.client.callTool({name:'create_invoice',arguments:{...args,idempotencyKey:'fictional_marmot_krw'}});assert.notEqual(result.isError,true);assert.deepEqual(sent,args);const saved=(result.structuredContent as any).invoice;for(const field of ['issueDate','dueDate','paymentTermDays','paymentTerms','discountBps','premiumBps','acceptedMethods'])assert.deepEqual(saved[field],(args as any)[field]);assert.equal(saved.discountAmount,7500);assert.equal(saved.premiumAmount,1500);assert.equal(saved.token,undefined);}finally{await p.close();}
 });
 
 test('business ledger API requires explicit read, invoice-write and bulk-record scopes',async()=>{

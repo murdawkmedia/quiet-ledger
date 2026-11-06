@@ -94,3 +94,7 @@ Cookie-authenticated template endpoints are `GET/POST /api/invoice-templates` an
 origin. They are not granted by an invoice API/MCP bearer key. Client records,
 private thread notes and email/gateway controls likewise require the private
 browser session. See [MCP and the versioned API](MCP.md) for invoice automation.
+
+
+See [payment terms and repeat work](BUSINESS-TOOLS.md) for fixed/custom day terms,
+relative templates, recurring drafts and owner statement/import previews.

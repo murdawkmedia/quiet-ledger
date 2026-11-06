@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { Invoice, Payout, PublicInvoice, Receipt, PaymentMethod } from '../shared/contracts.js';
 import { DomainError, Store } from './store.js';
 import {InvoiceLedger} from './invoice-ledger.js';
+import {paymentDueDate} from '../shared/payment-terms.js';
 import {calculateInvoiceAmounts,invoiceAllowsMethod} from '../shared/invoice-options.js';
 import {PAYMENT_METHOD_IDS} from '../shared/payment-methods.js';
 import {canFundPayout,isCryptoMethod,methodInfo} from '../shared/payment-methods.js';
@@ -39,6 +40,8 @@ export const invoiceSchema = z.object({
   title: z.string().trim().min(1).max(160),
   dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value=>{const parsed=new Date(value+'T00:00:00Z');return Number.isFinite(parsed.getTime())&&parsed.toISOString().slice(0,10)===value;},'Enter a valid due date.').optional(),
   issueDate:calendarDate.optional(),
+  paymentTermDays:z.number().int().min(0).max(3650).optional(),
+  paymentTerms:z.string().trim().max(2000).refine(value=>!/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value),'Use plain payment terms without control characters.').optional(),
   discountBps:z.number().int().min(0).max(10000).optional(),
   premiumBps:z.number().int().min(0).max(10000).optional(),
   acceptedMethods:z.array(z.enum(PAYMENT_METHOD_IDS)).min(1).max(PAYMENT_METHOD_IDS.length).refine(value=>new Set(value).size===value.length,'Select each accepted method only once.').optional(),
@@ -47,7 +50,7 @@ export const invoiceSchema = z.object({
   taxBps: z.number().int().min(0).max(10000).optional(),
   note: z.string().trim().max(2000).optional(),
   billing:invoiceBillingSchema.optional(),
-}).strict().refine(value=>!value.issueDate||!value.dueDate||value.dueDate>=value.issueDate,'Due date must not precede the issue date.');
+}).strict().refine(value=>!value.issueDate||!value.dueDate||value.dueDate>=value.issueDate,'Due date must not precede the issue date.').superRefine((value,context)=>{if(value.paymentTermDays!==undefined&&value.issueDate){try{const due=paymentDueDate(value.issueDate,value.paymentTermDays);if(value.dueDate&&value.dueDate!==due)context.addIssue({code:'custom',message:'Due date does not match the selected payment terms.'});}catch(error){context.addIssue({code:'custom',message:(error as Error).message});}}});
 
 export function parse<T>(schema: z.ZodType<T>, body: unknown): T {
   const result = schema.safeParse(body);
@@ -57,6 +60,12 @@ export function parse<T>(schema: z.ZodType<T>, body: unknown): T {
 
 export function createInvoice(store: Store, workspace: string, body: unknown, now: Date): Invoice {
   const input = parse(invoiceSchema, body);
+  if(input.paymentTermDays!==undefined){
+    const issue=input.issueDate??now.toISOString().slice(0,10);let due:string;
+    try{due=paymentDueDate(issue,input.paymentTermDays);}catch(error){throw new DomainError(400,(error as Error).message);}
+    if(input.dueDate&&input.dueDate!==due)throw new DomainError(400,'Due date does not match the selected payment terms.');
+    input.issueDate=issue;input.dueDate=due;
+  }
   const taxBps=input.taxBps??0;
   const calculated=calculateInvoiceAmounts(input.items,taxBps,input.discountBps??0,input.premiumBps??0);
   const subtotalBig=BigInt(calculated.subtotal),taxBig=BigInt(calculated.tax),totalBig=BigInt(calculated.total);
@@ -77,8 +86,8 @@ export function createInvoice(store: Store, workspace: string, body: unknown, no
 }
 
 export function publicInvoice(invoice: Invoice): PublicInvoice {
-  const { number, title, customerName, currency, items, taxBps, subtotal, tax, total, amountSats, status, createdAt, issueDate, dueDate, discountBps,premiumBps,discountAmount,premiumAmount,acceptedMethods, paidAt, note, billing, paymentMethod,settlementMode,nativePayment,balance } = invoice;
-  return { number, title, customerName, currency, items, taxBps, subtotal, tax, total, amountSats, status, createdAt, issueDate, dueDate, discountBps,premiumBps,discountAmount,premiumAmount,acceptedMethods, paidAt, note, ...(billing?{billing:{...billing}}:{}), paymentMethod,settlementMode,nativePayment,...(balance?{balance}:{}) };
+  const { number, title, customerName, currency, items, taxBps, subtotal, tax, total, amountSats, status, createdAt, issueDate, dueDate, discountBps,premiumBps,discountAmount,premiumAmount,acceptedMethods, paidAt, note, billing, paymentMethod,settlementMode,nativePayment,balance,paymentTermDays,paymentTerms } = invoice;
+  return { number, title, customerName, currency, items, taxBps, subtotal, tax, total, amountSats, status, createdAt, issueDate, dueDate, discountBps,premiumBps,discountAmount,premiumAmount,acceptedMethods, paidAt, note, ...(billing?{billing:{...billing}}:{}), paymentMethod,settlementMode,nativePayment,...(paymentTermDays!==undefined?{paymentTermDays}:{}),...(paymentTerms?{paymentTerms}:{}),...(balance?{balance}:{}) };
 }
 
 export function settleInvoice(store: Store, workspace: string, invoice: Invoice, method: PaymentMethod, now: Date) {
