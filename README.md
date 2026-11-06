@@ -67,6 +67,8 @@ receiving and redemption remain unimplemented.
 - [Saved clients and invoice templates](docs/INVOICES.md), billing details captured
   at issue time, invoice/receipt printing, CAD/USD/KRW/EUR/GBP, discounts, premiums,
   accepted-method controls and private checkout links.
+- [Deposits and invoice balances](docs/INVOICE-LEDGER.md), separate installment
+  receipts, credits, unpaid voids and exact currency CSV exports.
 - Direct two-person Marmot rooms with explicit invitations, a separate messaging
   identity, a public-key QR and passphrase-encrypted browser storage.
 - [Invoice email](docs/INVOICE-EMAIL.md), optional inbox reading, reviewed threaded
@@ -113,6 +115,8 @@ npm run build
 npm test
 npm run typecheck
 npm run test:e2e
+npx playwright test --config tests/invoice-ledger-ui.config.ts
+npx playwright test tests/browser/invoice-ledger-live.spec.ts
 npx playwright test --config tests/invoice-editor-ui.config.ts
 npx playwright test --config tests/client-threads-browser.config.ts
 npx playwright test --config tests/production-messages-browser.config.ts

@@ -95,6 +95,7 @@ test('actual app Cashu handoff keeps one Lightning allocation and provider-verif
     await page.goto(`${fixture.origin}/pay/${invoice.token}`);
     await page.getByRole('combobox',{name:'Payment method',exact:true}).selectOption('lightning');
     await page.getByRole('button',{name:'Continue with live payment',exact:true}).click();
+    await expect(page).toHaveURL(/\/receive\/[^/]+$/);
     const receiveUrl=page.url(),button=page.getByRole('button',{name:'Pay from a Cashu wallet',exact:true});
     await button.click();await expect(page.getByRole('img',{name:'Scan this Lightning invoice in your Cashu wallet',exact:true})).toBeVisible();
     await expect(page.getByText('1,000 sats',{exact:true})).toBeVisible();

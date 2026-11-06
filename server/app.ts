@@ -24,6 +24,8 @@ import {METHOD_DEFINITIONS,PAYMENT_METHOD_IDS,methodInfo,receivedValue,canFundPa
 import {WALLET_OPTIONS} from '../shared/wallet-options.js';
 import type {ReceivingAdapter} from '../shared/receiving.js';
 import {ReceivingService,type QuoteReceiving} from './receiving-service.js';
+import {InvoiceLedger} from './invoice-ledger.js';
+import {invoiceLedgerRouter} from './invoice-ledger-router.js';
 import {quoteReceiving} from './receiving-quote.js';
 import {inspectCollateral,type CollateralConfig} from '../integrations/collateral.js';
 import {inspectArk,type ArkConnectionConfig} from '../integrations/ark-receiving.js';
@@ -115,6 +117,7 @@ export function createApp(options: AppOptions) {
   const isHackathonWorkspace=(workspace:string)=>Boolean(hackathonDemo&&store.db.prepare('SELECT 1 FROM hackathon_demo_workspaces WHERE id=?').get(workspace));
   const assertPublicWorkspace=(workspace:string)=>{if(isHackathonWorkspace(workspace)&&(!demoEnabled||!hackathonDemo!.hasWorkspace(workspace)))throw new DomainError(404,'This demo visit is unavailable or expired.');};
   const denyDemoFinancial=(workspace:string)=>{if(isHackathonWorkspace(workspace))throw new DomainError(403,'Use the signed-in demo tour to simulate this fictional payment.');};
+  const invoiceLedger=new InvoiceLedger(store);
   const squareSandbox=new SquareSandbox(store,options.squareSandbox,now);
   const paymentReports=new PaymentReports(store);
   const invoiceTemplates=new InvoiceTemplates(store);
@@ -142,7 +145,7 @@ export function createApp(options: AppOptions) {
   };
   const walletOptions=(workspace='owner')=>WALLET_OPTIONS.map(option=>({...option,configured:receivingFor(workspace).metadata().some(adapter=>adapter.walletOptionIds?.includes(option.id))}));
   const receivingForToken=(value:string)=>{const row=store.db.prepare('SELECT workspace FROM receiving_requests WHERE token=?').get(store.tokenIndex(value));if(!row)throw new DomainError(404,'Receive request not found.');denyDemoFinancial(String(row.workspace));return receivingFor(String(row.workspace));};
-  const publicView=(invoice:Invoice)=>{const value=publicInvoice(invoice);if(!hosted)return value;const {note:_note,nativePayment,...safe}=value;return {...safe,...(nativePayment?{nativePayment:{asset:nativePayment.asset,atomicAmount:nativePayment.atomicAmount,network:nativePayment.network,verification:nativePayment.verification}}:{})};};
+  const publicView=(invoice:Invoice)=>{const value=publicInvoice(invoiceLedger.withBalance(invoice));if(!hosted)return value;const {note:_note,nativePayment,...safe}=value;return {...safe,...(nativePayment?{nativePayment:{asset:nativePayment.asset,atomicAmount:nativePayment.atomicAmount,network:nativePayment.network,verification:nativePayment.verification}}:{})};};
   const publicReceipt=(receipt:Receipt)=>{if(!hosted||!receipt.nativePayment)return receipt;const {paymentId:_paymentId,...proof}=receipt.nativePayment;return {...receipt,nativePayment:proof};};
   if(!hosted)seedDemo(store, now());
   const app = express();
@@ -296,6 +299,8 @@ export function createApp(options: AppOptions) {
     const result = store.idempotent('public-payment', idempotencyKey(req), { checkout: hash(checkoutToken), ...input }, 200, () => {
       const found = store.getCheckout(checkoutToken);
       if (!found) throw new DomainError(404, 'Checkout not found.');
+      const balance=invoiceLedger.balance(found.invoice,found.workspace);
+      if(found.invoice.status!=='paid'&&(balance.due!==found.invoice.total||balance.state==='void'))throw new DomainError(409,'An adjusted invoice requires its current live receiving flow.');
       if((hosted||found.workspace==='owner')&&receivingFor(found.workspace).hasLive())throw new DomainError(409,'This business uses live receiving. Choose a configured live payment method.');
       if(!invoiceAllowsMethod(found.invoice,input.method))throw new DomainError(400,'This payment method is not accepted for this invoice.');
       if(found.invoice.status!=='paid'&&invoiceRequiresManualReport(found.invoice,input.method))return {invoice:publicView(found.invoice),alreadyPaid:false,report:paymentReports.report(found.workspace,found.invoice.id,input.method,now())};
@@ -304,7 +309,7 @@ export function createApp(options: AppOptions) {
     sendResult(res, result);
   });
   app.get('/api/receipts/:token', (req, res) => {
-    const found = store.getReceipt(param(req, 'token'));
+    const found = invoiceLedger.getReceipt(param(req,'token'))??store.getReceipt(param(req, 'token'));
     if (!found) throw new DomainError(404, 'Receipt not found.');
     assertPublicWorkspace(store.invoiceWorkspace(found.invoice.id));
     res.json({ receipt: publicReceipt(found.receipt), invoice: publicView(found.invoice) });
@@ -320,7 +325,7 @@ export function createApp(options: AppOptions) {
     res.json({request:await receivingForToken(param(req,'token')).checkPublic(param(req,'token'),input)});
   });
   app.post('/api/checkout/:token/receiving',sameOrigin,async(req,res)=>{
-    const input=parse(z.object({method:z.enum(METHOD_DEFINITIONS.map(row=>row.id)),adapterId:z.string().min(1).max(192)}).strict(),req.body);
+    const input=parse(z.object({method:z.enum(METHOD_DEFINITIONS.map(row=>row.id)),adapterId:z.string().min(1).max(192),amount:z.number().int().min(1).max(1_000_000_000).optional()}).strict(),req.body);
     const found=store.getCheckout(param(req,'token'));if(!found||(!hosted&&found.workspace!=='owner'))throw new DomainError(404,'Live receiving invoice not found.');
     denyDemoFinancial(found.workspace);
     res.status(201).json({request:await receivingFor(found.workspace).create(found.workspace,{invoiceId:found.invoice.id,...input},idempotencyKey(req))});
@@ -392,10 +397,10 @@ export function createApp(options: AppOptions) {
   });
   app.get('/api/dashboard', (_req, res) => {
     const workspace = (res.locals.session as StoredSession).workspace;
-    const invoices = store.listInvoices(workspace);
+    const invoices = store.listInvoices(workspace).map(invoice=>invoiceLedger.withBalance(invoice,workspace));
     const payouts = store.listPayouts(workspace);
     const invoicedCad = invoices.reduce((sum, invoice) => sum + invoice.totalCad, 0);
-    const receivedCad = invoices.filter(invoice => invoice.status === 'paid').reduce((sum, invoice) => sum + receivedValue(invoice.paymentMethod!,invoice.totalCad), 0);
+    const receivedCad = invoices.reduce((sum,invoice)=>sum+(invoice.settlementMode==='live'?invoiceLedger.receivedCad(invoice,workspace):invoice.status==='paid'?receivedValue(invoice.paymentMethod!,invoice.totalCad):0),0);
     const payoutEligibleCad=invoices.filter(invoice=>invoice.status==='paid'&&invoice.settlementMode!=='live'&&canFundPayout(invoice.paymentMethod)).reduce((sum,invoice)=>sum+invoice.totalCad,0);
     const spentCad = payouts.filter(payout => payout.status !== 'quoted').reduce((sum, payout) => sum + payout.totalDebit, 0);
     res.json({ totals: { invoicedCad, receivedCad, availableCad: payoutEligibleCad - spentCad, spentCad }, invoices, payouts, activity: store.audits(workspace) });
@@ -410,19 +415,20 @@ export function createApp(options: AppOptions) {
     const limit=req.query.limit===undefined?25:Number(req.query.limit);if(!Number.isSafeInteger(limit)||limit<1||limit>100)throw new DomainError(400,'List limit must be between 1 and 100.');
     let before=Number.MAX_SAFE_INTEGER;if(req.query.cursor!==undefined){const cursor=String(req.query.cursor),decoded=Buffer.from(cursor,'base64url').toString();if(!/^[1-9]\d*$/.test(decoded)||Buffer.from(decoded).toString('base64url')!==cursor)throw new DomainError(400,'Invalid list cursor.');before=Number(decoded);if(!Number.isSafeInteger(before))throw new DomainError(400,'Invalid list cursor.');}return {limit,before};
   }
+  app.use('/api',invoiceLedgerRouter(store,invoiceLedger,now));
   app.get('/api/invoices', (req, res) => {
     const workspace=(res.locals.session as StoredSession).workspace;
-    if(!res.locals.apiAccess)return res.json({invoices:store.listInvoices(workspace)});
+    if(!res.locals.apiAccess)return res.json({invoices:store.listInvoices(workspace).map(invoice=>invoiceLedger.withBalance(invoice,workspace))});
     const {limit,before}=paging(req),rows=store.db.prepare('SELECT rowid,id,workspace,data FROM invoices WHERE workspace=? AND rowid<? ORDER BY rowid DESC LIMIT ?').all(workspace,before,limit+1),page=rows.slice(0,limit);
-    return res.json({invoices:page.map(row=>store.decode(row.data,'invoices',String(row.id),String(row.workspace))),nextCursor:rows.length>limit?Buffer.from(String(page.at(-1)!.rowid)).toString('base64url'):null});
+    return res.json({invoices:page.map(row=>invoiceLedger.withBalance(store.decode<Invoice>(row.data,'invoices',String(row.id),String(row.workspace)),workspace)),nextCursor:rows.length>limit?Buffer.from(String(page.at(-1)!.rowid)).toString('base64url'):null});
   });
   const receivingOwner:express.RequestHandler=(_req,res,next)=>{if((res.locals.session as StoredSession).role!=='owner')return next(new DomainError(403,'Live receiving is available only in the private owner workspace.'));next();};
   app.use('/api/receiving',receivingOwner);
-  app.get('/api/receiving',(req,res)=>{const workspace=(res.locals.session as StoredSession).workspace,{limit,before}=paging(req);res.json({...receivingFor(workspace).list(workspace,limit,before),adapters:receivingFor(workspace).metadata(),walletOptions:walletOptions(workspace),defaultMode:'live'});});
+  app.get('/api/receiving',(req,res)=>{const workspace=(res.locals.session as StoredSession).workspace,{limit,before}=paging(req),invoiceId=req.query.invoiceId===undefined?undefined:parse(z.string().uuid(),req.query.invoiceId);res.json({...receivingFor(workspace).list(workspace,limit,before,invoiceId),adapters:receivingFor(workspace).metadata(),walletOptions:walletOptions(workspace),defaultMode:'live'});});
   app.get('/api/receiving/:id',(req,res)=>{const workspace=(res.locals.session as StoredSession).workspace;res.json({request:receivingFor(workspace).read(param(req,'id'),workspace)});});
   app.post('/api/receiving',async(req,res)=>{
     const workspace=(res.locals.session as StoredSession).workspace;
-    const input=parse(z.object({invoiceId:z.string().min(1).max(128),method:z.enum(METHOD_DEFINITIONS.map(row=>row.id)),adapterId:z.string().min(1).max(192)}).strict(),req.body);
+    const input=parse(z.object({invoiceId:z.string().min(1).max(128),method:z.enum(METHOD_DEFINITIONS.map(row=>row.id)),adapterId:z.string().min(1).max(192),amount:z.number().int().min(1).max(1_000_000_000).optional()}).strict(),req.body);
     res.status(201).json({request:await receivingFor(workspace).create(workspace,input,idempotencyKey(req))});
   });
   app.post('/api/receiving/:id/recover',async(req,res)=>{const workspace=(res.locals.session as StoredSession).workspace;parse(z.object({}).strict(),req.body??{});res.json({request:await receivingFor(workspace).recover(param(req,'id'),workspace)});});
@@ -437,7 +443,7 @@ export function createApp(options: AppOptions) {
   app.get('/api/invoices/:id', (req, res) => {
     const invoice = store.getInvoice(param(req, 'id'), (res.locals.session as StoredSession).workspace);
     if (!invoice) throw new DomainError(404, 'Invoice not found.');
-    res.json(invoice);
+    res.json(invoiceLedger.withBalance(invoice));
   });
   app.post('/api/invoices/:id/revoke-links',(req,res)=>{const workspace=(res.locals.session as StoredSession).workspace;parse(z.object({}).strict(),req.body??{});sendResult(res,store.idempotent('revoke-links:'+workspace,idempotencyKey(req),{id:param(req,'id')},200,()=>store.revokeInvoiceLinks(param(req,'id'),workspace,now().toISOString())));});
   app.post('/api/invoices', (req, res) => {
@@ -469,8 +475,9 @@ export function createApp(options: AppOptions) {
   });
   app.get('/api/evidence/export', (_req, res) => {
     const workspace = (res.locals.session as StoredSession).workspace;
-    const invoices = store.listInvoices(workspace).map(({ token: _token, receiptToken: _receiptToken, ...invoice }) => invoice);
-    const payments = invoices.filter(invoice => invoice.status === 'paid').map(invoice => ({ invoiceNumber: invoice.number, method: invoice.paymentMethod, amount: invoice.total, currency: invoice.currency, paidAt: invoice.paidAt, mode: invoice.settlementMode??'simulation',...(invoice.nativePayment?{nativePayment:invoice.nativePayment}:{}) }));
+    const records=store.listInvoices(workspace);
+    const invoices = records.map(invoice=>invoiceLedger.withBalance(invoice,workspace)).map(({ token: _token, receiptToken: _receiptToken, ...invoice }) => invoice);
+    const payments = records.flatMap(invoice=>invoiceLedger.paymentRecords(invoice,workspace));
     const mode=payments.some(payment=>payment.mode==='live')?'mixed':'simulation';
     res.attachment('quiet-ledger-records.json').json({ schemaVersion: 1, mode, exportedAt: now().toISOString(), verification: mode==='simulation'?'Locally generated simulation records. Not bank-authenticated or lender-accepted evidence.':'Live receiving and simulation records are labelled individually. Manual review is distinct from provider verification; no lender acceptance is implied.', invoices, payments, payouts: store.listPayouts(workspace), activity: store.audits(workspace, true) });
   });
@@ -493,7 +500,7 @@ export function createApp(options: AppOptions) {
   });
   app.use('/api', (_req, res) => res.status(404).json({ error: 'API route not found.' }));
   app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
-    if (error instanceof DomainError) return res.status(error.status).json({ error: error.message });
+    if (error instanceof DomainError) return res.status(error.status).json({ error: error.message,...(error.code?{code:error.code}:{}) });
     if (error instanceof SyntaxError || error instanceof ZodError) return res.status(400).json({ error: 'Invalid JSON request.' });
     if (error && typeof error === 'object' && 'type' in error && error.type === 'entity.too.large') return res.status(413).json({ error: 'Request body is too large.' });
     return res.status(500).json({ error: 'The request could not be completed.' });

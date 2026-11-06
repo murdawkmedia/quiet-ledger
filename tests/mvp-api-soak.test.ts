@@ -139,7 +139,8 @@ test('API soak: concurrent tenants retain separate retry identities through manu
       const dashboard=(await actors[index].get('/api/dashboard').expect(200)).body;
       assert.equal(dashboard.totals.availableCad,0);
     }
-    assert.equal(Number(f.store.db.prepare('SELECT COUNT(*) AS n FROM receipts').get()!.n),15);
+    assert.equal(Number(f.store.db.prepare('SELECT COUNT(*) AS n FROM receipts').get()!.n),0);
+    assert.equal(Number(f.store.db.prepare('SELECT COUNT(*) AS n FROM invoice_ledger_entries WHERE receiving_id IS NOT NULL').get()!.n),15);
   }finally{await f.close();}
 });
 

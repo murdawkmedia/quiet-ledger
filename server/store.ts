@@ -6,7 +6,7 @@ import {createRecordCodec} from './record-codec.js';
 import type { AuditEvent, Invoice, Payout, Receipt } from '../shared/contracts.js';
 
 export class DomainError extends Error {
-  constructor(public status: number, message: string) { super(message); }
+  constructor(public status: number, message: string,public code?:string) { super(message); }
 }
 
 export interface StoredSession { role: 'demo' | 'owner'; workspace: string; accountId?:string; hackathonDemo?:boolean; csrf: string; expires: string }

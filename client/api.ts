@@ -1,6 +1,6 @@
 let csrfToken = '';
 export function setCsrf(value?:string) { csrfToken = value ?? ''; }
-export class ApiError extends Error { constructor(message:string,public status:number) { super(message); } }
+export class ApiError extends Error { constructor(message:string,public status:number,public code?:string) { super(message); } }
 export async function api<T>(path:string, options:RequestInit = {}):Promise<T> {
   const headers = new Headers(options.headers);
   if (options.body && !headers.has('Content-Type')) headers.set('Content-Type','application/json');
@@ -8,7 +8,7 @@ export async function api<T>(path:string, options:RequestInit = {}):Promise<T> {
   const response = await fetch(path,{...options,headers,credentials:'same-origin'});
   const contentType = response.headers.get('content-type') ?? '';
   const result = contentType.includes('application/json') ? await response.json() : null;
-  if (!response.ok) throw new ApiError(result?.error || `Request could not be completed (${response.status}).`,response.status);
+  if (!response.ok) throw new ApiError(result?.error || `Request could not be completed (${response.status}).`,response.status,result?.code);
   return result as T;
 }
 export const post = <T,>(path:string,body?:unknown,key?:string) => api<T>(path,{method:'POST',body:body===undefined?undefined:JSON.stringify(body),headers:key?{'Idempotency-Key':key}:undefined});

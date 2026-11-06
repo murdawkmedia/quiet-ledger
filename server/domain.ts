@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { Invoice, Payout, PublicInvoice, Receipt, PaymentMethod } from '../shared/contracts.js';
 import { DomainError, Store } from './store.js';
+import {InvoiceLedger} from './invoice-ledger.js';
 import {calculateInvoiceAmounts,invoiceAllowsMethod} from '../shared/invoice-options.js';
 import {PAYMENT_METHOD_IDS} from '../shared/payment-methods.js';
 import {canFundPayout,isCryptoMethod,methodInfo} from '../shared/payment-methods.js';
@@ -76,13 +77,16 @@ export function createInvoice(store: Store, workspace: string, body: unknown, no
 }
 
 export function publicInvoice(invoice: Invoice): PublicInvoice {
-  const { number, title, customerName, currency, items, taxBps, subtotal, tax, total, amountSats, status, createdAt, issueDate, dueDate, discountBps,premiumBps,discountAmount,premiumAmount,acceptedMethods, paidAt, note, billing, paymentMethod,settlementMode,nativePayment } = invoice;
-  return { number, title, customerName, currency, items, taxBps, subtotal, tax, total, amountSats, status, createdAt, issueDate, dueDate, discountBps,premiumBps,discountAmount,premiumAmount,acceptedMethods, paidAt, note, ...(billing?{billing:{...billing}}:{}), paymentMethod,settlementMode,nativePayment };
+  const { number, title, customerName, currency, items, taxBps, subtotal, tax, total, amountSats, status, createdAt, issueDate, dueDate, discountBps,premiumBps,discountAmount,premiumAmount,acceptedMethods, paidAt, note, billing, paymentMethod,settlementMode,nativePayment,balance } = invoice;
+  return { number, title, customerName, currency, items, taxBps, subtotal, tax, total, amountSats, status, createdAt, issueDate, dueDate, discountBps,premiumBps,discountAmount,premiumAmount,acceptedMethods, paidAt, note, ...(billing?{billing:{...billing}}:{}), paymentMethod,settlementMode,nativePayment,...(balance?{balance}:{}) };
 }
 
 export function settleInvoice(store: Store, workspace: string, invoice: Invoice, method: PaymentMethod, now: Date) {
   if(!invoiceAllowsMethod(invoice,method))throw new DomainError(400,'This payment method is not accepted for this invoice.');
   if (invoice.status === 'paid') return { invoice: publicInvoice(invoice), receiptToken: invoice.receiptToken!, alreadyPaid: true };
+  const ledger=new InvoiceLedger(store),balance=ledger.balance(invoice,workspace);
+  const liveRequest=store.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='receiving_requests'").get()&&store.db.prepare('SELECT id,data FROM receiving_requests WHERE invoice_id=? AND workspace=?').all(invoice.id,workspace).some(row=>store.decode<any>(row.data,'receiving_requests',String(row.id),workspace).mode==='live');
+  if(balance.due!==invoice.total||balance.state==='void'||liveRequest)throw new DomainError(409,'An adjusted or live receiving invoice cannot be settled by a simulated payment.');
   const receiptToken = token();
   const receipt: Receipt = { number: `R-${invoice.number}`, issuedAt: now.toISOString(), mode: 'simulation', method, amount: invoice.total, currency: invoice.currency, invoiceNumber: invoice.number, title: invoice.title, customerName: invoice.customerName, ...(method === 'cashu' ? { amountSats: invoice.amountSats } : {}) };
   const paid: Invoice = { ...invoice, status: 'paid', paymentMethod: method, paidAt: now.toISOString(), receiptToken };

@@ -1,7 +1,7 @@
 # Private HTTP API and MCP
 
 Quiet Ledger exposes a scoped bearer API at
-`https://quiet-ledger-dyp.pages.dev/api/v1` and nine stdio MCP tools. Local mode
+`https://quiet-ledger-dyp.pages.dev/api/v1` and twelve stdio MCP tools. Local mode
 also provides `http://127.0.0.1:4317/api/v1`. Invoice creation, receiving instructions, provider
 readback and observations of existing Bitcoin collateral are supported. Wallet
 and provider choice stays with the user. Adapter mode is explicit; live/mainnet
@@ -62,7 +62,7 @@ Set the same three environment variables in your MCP host configuration.
 Remote access requires HTTPS and rejects userinfo, paths, queries, fragments and
 redirects. Leave `QUIET_LEDGER_ALLOW_REMOTE` unset for the loopback-only default.
 This is a local stdio process that calls the hosted API, not a public MCP daemon.
-All nine tools passed an actual public-URL run with a fictional account key,
+The earlier nine-tool baseline passed an actual public-URL run with a fictional account key,
 which was revoked after testing. Unconfigured Ark/collateral returned unavailable.
 
 HTTP clients should send a descriptive application `User-Agent`, such as
@@ -256,3 +256,22 @@ eval set, not a claim that an autonomous model completed them.
   </eval>
 </evals>
 ```
+
+## Invoice balances, credits and installments
+
+`get_invoice_ledger` reads the balance and first100entries; `entriesTruncated`
+indicates additional owner history. Receipt capabilities are omitted.
+`create_credit_note` and `void_invoice` require invoice-write scope, an explicit
+owner-requested correction, reason and stable retry key. They cannot receive,
+refund or send funds. Ledger tool tests use controlled API/SDK fixtures.
+
+`create_receive_request` accepts optional integer `amount` in invoice currency
+minor units for a deposit/installment; omission uses the current amount due.
+Read the ledger before choosing an amount. The server rechecks due and provider
+eligibility before allocation; a stale balance is not authority to over-allocate.
+
+HTTP endpoints: GET `/invoices/:id/ledger` uses invoices:read; POST
+`/invoices/:id/credits` and `/invoices/:id/void` use invoices:write. GET
+`/invoice-ledger/export.csv` is a bulk attachment requiring records:read.
+The existing v1 prefix, tenant isolation, CSRF for cookies and write idempotency
+remain. See [invoice ledger](INVOICE-LEDGER.md).

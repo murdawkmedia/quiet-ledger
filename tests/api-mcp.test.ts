@@ -94,7 +94,7 @@ async function protocol(api:LedgerApiClient){
   return {client,close:async()=>{await client.close();await server.close();}};
 }
 
-test('real MCP SDK lists nine annotated tools and executes every fixed API operation',async()=>{
+test('real MCP SDK lists twelve annotated tools and executes every fixed API operation',async()=>{
   const calls:{path:string;init:RequestInit}[]=[];
   const api=new LedgerApiClient({token,baseUrl:'http://127.0.0.1:49123',fetcher:async(input,init)=>{
     const url=new URL(String(input));calls.push({path:url.pathname+url.search,init:init??{}});
@@ -103,7 +103,7 @@ test('real MCP SDK lists nine annotated tools and executes every fixed API opera
   }});
   const p=await protocol(api);
   try{
-    const tools=(await p.client.listTools()).tools;assert.equal(tools.length,9);
+    const tools=(await p.client.listTools()).tools;assert.equal(tools.length,12);
     assert.equal(tools.some(t=>/confirm|send|withdraw|sign|seed|config/.test(t.name)),false);
     assert.equal(tools.find(t=>t.name==='check_receive_request')?.annotations?.readOnlyHint,false);
     assert.equal(tools.find(t=>t.name==='get_collateral')?.annotations?.readOnlyHint,true);
@@ -204,7 +204,7 @@ test('MCP stdio process communicates with SDK Client against a synthetic authent
   let stderr='';transport.stderr?.on('data',chunk=>{stderr+=String(chunk);});
   const client=new Client({name:'stdio-fixture-client',version:'1.0.0'});
   try{
-    await client.connect(transport);assert.equal((await client.listTools()).tools.length,9);
+    await client.connect(transport);assert.equal((await client.listTools()).tools.length,12);
     const output=await client.callTool({name:'list_invoices',arguments:{limit:10}});assert.notEqual(output.isError,true);assert.match(JSON.stringify(output),/QL-0001/);assert.equal(stderr.includes(token),false);
   }finally{await client.close();await new Promise<void>(resolve=>http.close(()=>resolve()));rmSync(dir,{recursive:true,force:true});}
 });
@@ -214,4 +214,39 @@ test('MCP invoice tools preserve KRW dates adjustments and allowed methods witho
  const args={customerName:'Fictional marmot client',title:'Workshop',currency:'KRW',items:[{description:'Capture',quantity:1,unitAmount:150000}],issueDate:'2026-11-05',dueDate:'2026-12-05',discountBps:500,premiumBps:100,acceptedMethods:['bitcoin','lightning']};
  const api=new LedgerApiClient({token,fetcher:async(_input,init)=>{sent=JSON.parse(String(init?.body));return Response.json({...invoice,...sent,discountAmount:7500,premiumAmount:1500,total:144000});}}),p=await protocol(api);
  try{const result=await p.client.callTool({name:'create_invoice',arguments:{...args,idempotencyKey:'fictional_marmot_krw'}});assert.notEqual(result.isError,true);assert.deepEqual(sent,args);const saved=(result.structuredContent as any).invoice;for(const field of ['issueDate','dueDate','discountBps','premiumBps','acceptedMethods'])assert.deepEqual(saved[field],(args as any)[field]);assert.equal(saved.discountAmount,7500);assert.equal(saved.premiumAmount,1500);assert.equal(saved.token,undefined);}finally{await p.close();}
+});
+
+test('business ledger API requires explicit read, invoice-write and bulk-record scopes',async()=>{
+ const auth=`Bearer ${token}`;
+ await request(authApp(['invoices:read'])).get('/api/v1/invoices/inv_1/ledger').set('Authorization',auth).expect(200);
+ await request(authApp(['invoices:write'])).post('/api/v1/invoices/inv_1/credits').set('Authorization',auth).expect(200);
+ await request(authApp(['invoices:write'])).post('/api/v1/invoices/inv_1/void').set('Authorization',auth).expect(200);
+ await request(authApp(['records:read'])).get('/api/v1/invoice-ledger/export.csv').set('Authorization',auth).expect(200);
+ for(const path of ['credits','void'])await request(authApp(['invoices:read'])).post('/api/v1/invoices/inv_1/'+path).set('Authorization',auth).expect(403);
+ await request(authApp(['invoices:read'])).get('/api/v1/invoice-ledger/export.csv').set('Authorization',auth).expect(403);
+});
+
+test('MCP business tools preserve exact credit idempotency and omit receipt capabilities',async()=>{
+ const calls:{path:string;init?:RequestInit}[]=[];
+ const balance={total:1200,paid:300,credited:0,due:900,overpaid:0,currency:'CAD',state:'partially_paid',mode:'live'};
+ const api=new LedgerApiClient({token,fetcher:async(url,init)=>{calls.push({path:new URL(String(url)).pathname,init});return Response.json({invoice:{...invoice,balance},balance,entries:[{id:'entry_1',kind:'payment',amount:300,currency:'CAD',createdAt:'2026-11-06T00:00:00Z',method:'lightning',verification:'provider',receiptToken:'private-receipt-capability',receiptNumber:'PAY-fixture'}]});}}),p=await protocol(api);
+ try{
+  const result=await p.client.callTool({name:'get_invoice_ledger',arguments:{invoiceId:'inv_1'}});assert.notEqual(result.isError,true);
+  assert.equal(JSON.stringify(result).includes('private-receipt-capability'),false);assert.deepEqual((result.structuredContent as any).balance,balance);
+  const body={invoiceId:'inv_1',amount:100,reason:'Fictional scope reduction',idempotencyKey:'fictional_credit_1'};
+  assert.notEqual((await p.client.callTool({name:'create_credit_note',arguments:body})).isError,true);
+  assert.notEqual((await p.client.callTool({name:'void_invoice',arguments:{invoiceId:'inv_1',reason:'Fictional cancellation',idempotencyKey:'fictional_void_1'}})).isError,true);
+  assert.equal(calls[1].path,'/api/v1/invoices/inv_1/credits');assert.equal(new Headers(calls[1].init?.headers).get('Idempotency-Key'),body.idempotencyKey);
+  assert.deepEqual(JSON.parse(String(calls[1].init?.body)),{amount:100,reason:body.reason});
+  const before=calls.length;assert.equal((await p.client.callTool({name:'create_credit_note',arguments:{...body,amount:0}})).isError,true);assert.equal(calls.length,before);
+ }finally{await p.close();}
+});
+
+test('MCP partial receiving passes the exact minor-unit amount and rejects fractions',async()=>{
+ let body:any,count=0;const p=await protocol(new LedgerApiClient({token,fetcher:async(_url,init)=>{count++;body=JSON.parse(String(init?.body));return Response.json({request:receive});}}));
+ try{
+  const args={invoiceId:'inv_1',method:'lightning',adapterId:'lnd',amount:300,idempotencyKey:'fictional_deposit_key'};
+  assert.notEqual((await p.client.callTool({name:'create_receive_request',arguments:args})).isError,true);assert.equal(body.amount,300);
+  assert.equal((await p.client.callTool({name:'create_receive_request',arguments:{...args,amount:1.5}})).isError,true);assert.equal(count,1);
+ }finally{await p.close();}
 });

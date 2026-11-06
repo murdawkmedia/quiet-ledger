@@ -58,7 +58,7 @@ test('hosted MCP sends its scoped token only to the fixed configured HTTPS API a
     return Response.json({invoices:[{id:'fictional-owned-invoice',number:'FICTIONAL-0001',customerName:'Synthetic account',title:'Fictional own-account record',currency:'CAD',total:125,status:'open',token:'synthetic-private-bearer-must-stay-hidden'}],nextCursor:null});
   }}));
   try{
-    const tools=await p.sdk.listTools();assert.equal(tools.tools.length,9);assert.equal(tools.tools.some(tool=>/send|capture|confirm|sign|withdraw|seed|config/.test(tool.name)),false);
+    const tools=await p.sdk.listTools();assert.equal(tools.tools.length,12);assert.equal(tools.tools.some(tool=>/send|capture|confirm|sign|withdraw|seed|config/.test(tool.name)),false);
     const read=await p.sdk.callTool({name:'list_invoices',arguments:{limit:2}});assert.notEqual(read.isError,true);assert.equal(JSON.stringify(read).includes('fictional-owned-invoice'),true);assert.equal(JSON.stringify(read).includes('synthetic-private-bearer'),false);assert.equal(JSON.stringify(read).includes(token),false);
     const write=await p.sdk.callTool({name:'create_invoice',arguments:{idempotencyKey:'synthetic_stable_invoice_key',customerName:'Synthetic account',title:'No write scope',currency:'CAD',items:[{description:'Fictional',quantity:1,unitAmount:125}]}});assert.equal(write.isError,true);assert.match(JSON.stringify(write),/forbidden/);assert.equal(JSON.stringify(write).includes(token),false);
     assert.equal(requests.length,2);assert.equal(requests[0].url,origin+'/api/v1/invoices?limit=2');assert.equal(requests[1].url,origin+'/api/v1/invoices');assert.equal(new Headers(requests[1].init.headers).get('Idempotency-Key'),'synthetic_stable_invoice_key');
