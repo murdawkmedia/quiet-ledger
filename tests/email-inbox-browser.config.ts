@@ -1,0 +1,3 @@
+import {defineConfig} from '@playwright/test';
+import {resolve} from 'node:path';
+export default defineConfig({testDir:'./browser',testMatch:'email-inbox.spec.ts',workers:1,timeout:45000,expect:{timeout:6000},outputDir:'.runtime/email-inbox-results',reporter:[['list']],use:{baseURL:'http://localhost:4354',browserName:'chromium',headless:true,launchOptions:{executablePath:'/usr/bin/chromium'}},webServer:{command:'node --import tsx tests/invoice-email-ui-app.ts',cwd:resolve(import.meta.dirname,'..'),url:'http://localhost:4354/api/health',reuseExistingServer:false,timeout:30000}});

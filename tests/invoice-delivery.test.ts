@@ -1,7 +1,11 @@
 import test from 'node:test';
+import {mkdtempSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import assert from 'node:assert/strict';
 import {Store,DomainError} from '../server/store.js';
 import {InvoiceDelivery} from '../server/invoice-delivery.js';
+import type {InvoiceEmailResult} from '../shared/invoice-delivery.js';
 import type {Invoice} from '../shared/contracts.js';
 
 const instant='2026-11-06T10:00:00.000Z';
@@ -9,6 +13,15 @@ const invoice:Invoice={id:'fixture-invoice',number:'INV-101',token:'fictional-pr
 function setup(){const store=new Store(':memory:',{encryptionKey:Buffer.alloc(32,41)});store.addInvoice('account-a',invoice);const delivery=new InvoiceDelivery(store,{publicOrigin:'https://ledger.example',now:()=>new Date(instant)});return{store,delivery};}
 const draft={action:'draft',to:['client@example.test'],copyToSelf:true,message:'Thanks for the workshop.'};
 const expectStatus=(status:number)=>(error:unknown)=>error instanceof DomainError&&error.status===status;
+
+test('separate database connections cannot reconcile an actively sending email or overwrite its history',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'ql-smtp-owner-')),path=join(dir,'ledger.sqlite'),encryptionKey=Buffer.alloc(32,61),first=new Store(path,{encryptionKey}),second=new Store(path,{encryptionKey});first.addInvoice('account-a',invoice);
+ let activeSend:Promise<unknown>|undefined;let release!:()=>void,started!:()=>void,sends=0;const held=new Promise<void>(r=>{release=r;}),ready=new Promise<void>(r=>{started=r;});
+ const a=new InvoiceDelivery(first,{publicOrigin:'https://ledger.example',transportFactory:()=>({verify:async()=>true,sendMail:async message=>{sends++;started();await held;return{accepted:[...message.to,...message.cc],rejected:[]};}})}),b=new InvoiceDelivery(second,{publicOrigin:'https://ledger.example',transportFactory:()=>({verify:async()=>true,sendMail:async message=>{sends++;return{accepted:[...message.to,...message.cc],rejected:[]};}})});
+ try{a.saveSettings('account-a',{savedRecipients:[],senderEmail:'sender@example.test',appPassword:'abcdefghijklmnop'});await a.verifyGmail('account-a',{demo:false});const input={action:'send',to:['client@example.test'],copyToSelf:false},pending=activeSend=a.send('account-a',invoice.id,input,'held-original',{demo:false});await ready;const id=b.view('account-a',invoice.id,{demo:false}).deliveries[0].deliveryId!;
+  assert.throws(()=>b.resolve('account-a',invoice.id,id,{outcome:'confirmed_not_sent',note:'Checked while another process is still sending.'},{demo:false}),expectStatus(409));await assert.rejects(b.send('account-a',invoice.id,input,'new-copy',{demo:false}),expectStatus(409));release();const result=await pending;assert.equal(result.body.state,'provider_accepted');assert.equal(sends,1);assert.equal(b.view('account-a',invoice.id,{demo:false}).deliveries[0].state,'provider_accepted');
+ }finally{release();await activeSend?.catch(()=>{});first.close();second.close();rmSync(dir,{recursive:true,force:true});}
+});
 
 test('saved recipients and self-copy settings are encrypted and isolated by workspace',()=>{
  const {store,delivery}=setup();try{
@@ -54,13 +67,13 @@ test('Gmail credentials are encrypted, never returned, scoped to the sender and 
 });
 
 test('real send only records SMTP acceptance after all recipients are accepted, and retry never resends',async()=>{
- const {store}=setup();let sends=0;const delivery=new InvoiceDelivery(store,{publicOrigin:'https://ledger.example',transportFactory:()=>({verify:async()=>true,sendMail:async message=>{sends++;assert.equal(message.from,'sender@example.test');assert.deepEqual(message.to,['client@example.test']);assert.deepEqual(message.cc,['sender@example.test']);assert.equal(message.disableUrlAccess,true);assert.equal(message.disableFileAccess,true);assert.match(message.messageId,/^<.+@ledger\.example>$/);return{messageId:'<fixture@example.test>',accepted:[...message.to,...message.cc],rejected:[]};}})});
+ const {store}=setup();let sends=0,requestedMessageId='';const delivery=new InvoiceDelivery(store,{publicOrigin:'https://ledger.example',transportFactory:()=>({verify:async()=>true,sendMail:async message=>{sends++;assert.equal(message.from,'sender@example.test');assert.deepEqual(message.to,['client@example.test']);assert.deepEqual(message.cc,['sender@example.test']);assert.equal(message.disableUrlAccess,true);assert.equal(message.disableFileAccess,true);assert.match(message.messageId,/^<.+@ledger\.example>$/);requestedMessageId=message.messageId;return{messageId:'<fixture@example.test>',accepted:[...message.to,...message.cc],rejected:[]};}})});
  try{
   delivery.saveSettings('account-a',{savedRecipients:[],senderEmail:'sender@example.test',appPassword:'abcdefghijklmnop'},{demo:false});
   await assert.rejects(delivery.send('account-a',invoice.id,{...draft,action:'send'},'unverified',{demo:false}),expectStatus(409));
   await delivery.verifyGmail('account-a',{demo:false});
   const input={...draft,action:'send'};const result=await delivery.send('account-a',invoice.id,input,'send-1',{demo:false});
-  assert.equal(result.body.state,'provider_accepted');assert.equal(result.body.messageId,'<fixture@example.test>');assert.equal(sends,1);assert.equal(store.getInvoice(invoice.id,'account-a')!.status,'open');
+  assert.equal(result.body.state,'provider_accepted');assert.equal(result.body.messageId,'<fixture@example.test>');assert.equal(result.body.requestedMessageId,requestedMessageId);assert.notEqual(result.body.requestedMessageId,result.body.messageId);assert.equal(sends,1);assert.equal(store.getInvoice(invoice.id,'account-a')!.status,'open');
   assert.deepEqual(await delivery.send('account-a',invoice.id,input,'send-1',{demo:false}),result);assert.equal(sends,1);
   await assert.rejects(delivery.send('account-a',invoice.id,{...input,to:['different@example.test']},'send-1',{demo:false}),expectStatus(409));
   await assert.rejects(delivery.send('account-a',invoice.id,input,'send-demo',{demo:true}),expectStatus(403));assert.equal(sends,1);
@@ -84,6 +97,75 @@ test('interrupted or partial SMTP submission never becomes a false send success 
    assert.equal(JSON.stringify(result).includes('abcdefghijklmnop'),false);
    await assert.rejects(restarted.send('account-a',invoice.id,input,'new-key-after-uncertain',{demo:false}),expectStatus(409));
   }finally{release?.();store.close();}
+ }
+});
+
+test('the owner can audit an uncertain submission without rewriting history or resending its original intent',async()=>{
+ for(const state of ['unknown','partial_rejection'] as const)for(const outcome of ['confirmed_sent','confirmed_not_sent'] as const){
+  const {store}=setup();let sends=0;
+  const delivery=new InvoiceDelivery(store,{publicOrigin:'https://ledger.example',now:()=>new Date(instant),transportFactory:()=>({verify:async()=>true,sendMail:async message=>{sends++;if(sends===1){if(state==='unknown')throw new Error('Secret provider text abcdefghijklmnop');return{accepted:[message.to[0]],rejected:message.cc};}return{accepted:[...message.to,...message.cc],rejected:[]};}})});
+  try{
+   assert.equal(typeof delivery.resolve,'function');
+   delivery.saveSettings('account-a',{savedRecipients:[],senderEmail:'sender@example.test',appPassword:'abcdefghijklmnop'});await delivery.verifyGmail('account-a',{demo:false});
+   const input={...draft,action:'send'},first=await delivery.send('account-a',invoice.id,input,'original',{demo:false});
+   const resolution={outcome,note:'Checked the dedicated mailbox with the client.'};
+   const resolved=delivery.resolve('account-a',invoice.id,first.body.deliveryId!,resolution,{demo:false});
+   assert.equal(resolved.status,200);assert.equal(resolved.body.state,state);assert.equal(resolved.body.deliveryId,first.body.deliveryId);assert.equal(resolved.body.resolvedAt,instant);assert.equal(resolved.body.resolutionOutcome,outcome);assert.equal(resolved.body.resolutionNote,resolution.note);
+   const audit=store.audits('account-a').filter(row=>row.action==='invoice.email_resolution');assert.equal(audit.length,1);assert.match(audit[0].description,new RegExp(outcome));assert.ok(audit[0].description.includes(first.body.deliveryId!));assert.equal(audit[0].description.includes(resolution.note),false);assert.equal(JSON.stringify(store.audits('account-a')).includes('abcdefghijklmnop'),false);
+   assert.deepEqual(delivery.resolve('account-a',invoice.id,first.body.deliveryId!,resolution,{demo:false}),resolved);assert.equal(store.audits('account-a').filter(row=>row.action==='invoice.email_resolution').length,1);
+   assert.throws(()=>delivery.resolve('account-a',invoice.id,first.body.deliveryId!,{...resolution,outcome:outcome==='confirmed_sent'?'confirmed_not_sent':'confirmed_sent'},{demo:false}),expectStatus(409));
+   assert.throws(()=>delivery.resolve('account-a',invoice.id,first.body.deliveryId!,{...resolution,note:'Changed reconciliation account.'},{demo:false}),expectStatus(409));
+   assert.deepEqual(await delivery.send('account-a',invoice.id,input,'original',{demo:false}),resolved);assert.equal(sends,1);
+   const raw=String(store.db.prepare('SELECT data FROM invoice_email_deliveries WHERE id=?').get(first.body.deliveryId!)!.data);assert.equal(raw.includes(resolution.note),false);
+   const copy=await delivery.send('account-a',invoice.id,input,'explicit-new-copy',{demo:false});assert.equal(sends,2);assert.equal(copy.body.state,'provider_accepted');assert.notEqual(copy.body.deliveryId,first.body.deliveryId);assert.notEqual(copy.body.requestedMessageId,first.body.requestedMessageId);
+   const historic=delivery.view('account-a',invoice.id,{demo:false}).deliveries.find(row=>row.deliveryId===first.body.deliveryId);assert.deepEqual(historic,resolved.body);assert.equal(store.getInvoice(invoice.id,'account-a')!.status,'open');
+  }finally{store.close();}
+ }
+});
+
+test('resolution validates a strict bounded note and denies foreign invoices, workspaces and demos',async()=>{
+ const {store}=setup();const delivery=new InvoiceDelivery(store,{publicOrigin:'https://ledger.example',transportFactory:()=>({verify:async()=>true,sendMail:async()=>{throw new Error('Fictional timeout.');}})});
+ try{
+  assert.equal(typeof delivery.resolve,'function');
+  store.addInvoice('account-a',{...invoice,id:'other-invoice',token:'other-checkout'});store.addInvoice('account-b',{...invoice,id:'foreign-invoice',token:'foreign-checkout'});
+  delivery.saveSettings('account-a',{savedRecipients:[],senderEmail:'sender@example.test',appPassword:'abcdefghijklmnop'});await delivery.verifyGmail('account-a',{demo:false});
+  const first=await delivery.send('account-a',invoice.id,{...draft,action:'send'},'resolve-validation',{demo:false}),id=first.body.deliveryId!,resolution={outcome:'confirmed_not_sent',note:'Checked the mailbox.'};
+  for(const invalid of [null,{}, {...resolution,note:'four'},{...resolution,note:' '.repeat(5)},{...resolution,note:'x'.repeat(1001)},{...resolution,note:'Hello\u0000there'},{...resolution,outcome:'provider_accepted'},{...resolution,workspace:'account-a'},{...resolution,resolvedAt:instant},{...resolution,state:'provider_accepted'}])assert.throws(()=>delivery.resolve('account-a',invoice.id,id,invalid,{demo:false}),expectStatus(400));
+  assert.throws(()=>delivery.resolve('account-a','other-invoice',id,resolution,{demo:false}),expectStatus(404));assert.throws(()=>delivery.resolve('account-b','foreign-invoice',id,resolution,{demo:false}),expectStatus(404));assert.throws(()=>delivery.resolve('account-b',invoice.id,id,resolution,{demo:false}),expectStatus(404));assert.throws(()=>delivery.resolve('account-a',invoice.id,id,resolution,{demo:true}),expectStatus(403));assert.throws(()=>delivery.resolve('account-a',invoice.id,'missing-delivery',resolution,{demo:false}),expectStatus(404));
+  assert.equal(store.audits('account-a').filter(row=>row.action==='invoice.email_resolution').length,0);assert.equal(delivery.view('account-a',invoice.id,{demo:false}).deliveries[0].resolvedAt,undefined);
+ }finally{store.close();}
+});
+
+test('a persisted interrupted send can be resolved but an active send cannot be bypassed by another service instance',async()=>{
+ const {store}=setup();let release!:()=>void,sends=0;const pending=new Promise<void>(resolve=>{release=resolve;});
+ const options={publicOrigin:'https://ledger.example',transportFactory:()=>({verify:async()=>true,sendMail:async()=>{sends++;await pending;throw new Error('Fictional interrupted result.');}})};const delivery=new InvoiceDelivery(store,options);
+ try{
+  assert.equal(typeof delivery.resolve,'function');
+  delivery.saveSettings('account-a',{savedRecipients:[],senderEmail:'sender@example.test',appPassword:'abcdefghijklmnop'});await delivery.verifyGmail('account-a',{demo:false});
+  const input={...draft,action:'send'},sending=delivery.send('account-a',invoice.id,input,'interrupted',{demo:false});await new Promise(resolve=>setImmediate(resolve));
+  const id=delivery.view('account-a',invoice.id,{demo:false}).deliveries[0].deliveryId!,resolution={outcome:'confirmed_not_sent',note:'Verified the mailbox after the interruption.'};
+  const restarted=new InvoiceDelivery(store,options);assert.throws(()=>restarted.resolve('account-a',invoice.id,id,resolution,{demo:false}),expectStatus(409));await assert.rejects(restarted.send('account-a',invoice.id,input,'cannot-bypass-active',{demo:false}),expectStatus(409));assert.equal(sends,1);
+  release();await sending;
+  const row=store.db.prepare('SELECT data FROM invoice_email_deliveries WHERE id=?').get(id)!,interrupted=store.decode<InvoiceEmailResult>(row.data,'invoice_email_deliveries',id,'account-a');interrupted.state='sending';
+  store.db.prepare('UPDATE invoice_email_deliveries SET state=?,data=? WHERE id=?').run('sending',store.encode(interrupted,'invoice_email_deliveries',id,'account-a'),id);
+  const resolved=restarted.resolve('account-a',invoice.id,id,resolution,{demo:false});assert.equal(resolved.body.state,'unknown');assert.equal(resolved.body.resolutionOutcome,'confirmed_not_sent');assert.equal(store.db.prepare('SELECT state FROM invoice_email_deliveries WHERE id=?').get(id)!.state,'unknown');assert.deepEqual(await restarted.send('account-a',invoice.id,input,'interrupted',{demo:false}),resolved);assert.equal(sends,1);
+ }finally{release();store.close();}
+});
+
+test('late SMTP completion cannot replace an explicit reconciliation after the send deadline',async()=>{
+ const {store}=setup();let finish!:()=>void;const finished=new Promise<void>(resolve=>{finish=resolve;});
+ const delivery=new InvoiceDelivery(store,{publicOrigin:'https://ledger.example',transportTimeoutMs:10,transportFactory:()=>({verify:async()=>true,sendMail:async message=>{await finished;return{accepted:[...message.to,...message.cc],rejected:[]};}})});
+ try{
+  assert.equal(typeof delivery.resolve,'function');delivery.saveSettings('account-a',{savedRecipients:[],senderEmail:'sender@example.test',appPassword:'abcdefghijklmnop'});await delivery.verifyGmail('account-a',{demo:false});
+  const input={...draft,action:'send'},first=await delivery.send('account-a',invoice.id,input,'late',{demo:false});assert.equal(first.body.state,'unknown');
+  const resolved=delivery.resolve('account-a',invoice.id,first.body.deliveryId!,{outcome:'confirmed_sent',note:'Confirmed the message in the mailbox.'},{demo:false});finish();await new Promise(resolve=>setImmediate(resolve));assert.deepEqual(await delivery.send('account-a',invoice.id,input,'late',{demo:false}),resolved);
+ }finally{finish();store.close();}
+});
+
+test('accepted and proven not-sent submissions do not accept an uncertain-outcome resolution',async()=>{
+ for(const state of ['provider_accepted','not_sent'] as const){
+  const {store}=setup();const delivery=new InvoiceDelivery(store,{publicOrigin:'https://ledger.example',transportFactory:()=>({verify:async()=>true,sendMail:async message=>{if(state==='not_sent')throw Object.assign(new Error('Fictional auth rejection.'),{code:'EAUTH',command:'AUTH PLAIN'});return{accepted:[...message.to,...message.cc],rejected:[]};}})});
+  try{assert.equal(typeof delivery.resolve,'function');delivery.saveSettings('account-a',{savedRecipients:[],senderEmail:'sender@example.test',appPassword:'abcdefghijklmnop'});await delivery.verifyGmail('account-a',{demo:false});const first=await delivery.send('account-a',invoice.id,{...draft,action:'send'},'known',{demo:false});assert.equal(first.body.state,state);assert.throws(()=>delivery.resolve('account-a',invoice.id,first.body.deliveryId!,{outcome:'confirmed_sent',note:'Checked the mailbox.'},{demo:false}),expectStatus(409));}finally{store.close();}
  }
 });
 

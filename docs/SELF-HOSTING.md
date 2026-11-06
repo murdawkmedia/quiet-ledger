@@ -122,9 +122,39 @@ RESTORE_DB_PATH=/absolute/private/recovery/ledger.sqlite node --env-file=/absolu
 Backup prints a generated archive basename; use that exact file for verify and
 restore. The restore database file must not exist; its parent directory must
 already be privately owned with mode 0700, outside the source tree. Inspect
-the command's result before connecting a restored installation. A server backup
-does not recover participant browser Marmot/MLS keys. Store recovery material in
-an encrypted offline location with access appropriate to your records.
+the command's result before connecting a restored installation. The returned
+`sha256` and `bytes` describe the restored database; `archiveSha256` identifies
+the original encrypted archive. Backup and verify preserve the archived snapshot.
+
+Restore deliberately removes persistent Email gateway identities, SDK/group state,
+writer leases and pairing settings from the new database, and cancels prepared
+email confirmations. It reports `communicationsReset: true` when this changes
+archived state. Every gateway starts disabled and requires explicit pairing with
+a newly generated gateway key and fresh room membership. Existing invoices,
+accounts, clients, thread history, mailbox records, source deduplication and email
+delivery records remain retained and encrypted. Unknown SMTP submissions remain
+unknown; check the mailbox and reconcile them before any new explicit send.
+The source database and encrypted archive are unchanged. Legacy backups without
+gateway state restore unchanged database bytes.
+
+Before cutting over, stop the old app and all workers that use its database or
+gateway identity, and prevent them from restarting. Do not run the recovered
+installation alongside the old sender. Confirm account access and financial
+records, then explicitly reconnect each wanted Email gateway. Accept the new
+invitation and complete pairing in White Noise; retire the old gateway room and
+review its old identity on every participating device. Old pairing codes and
+email confirmations cannot authorize sends through the replacement gateway.
+Clearing only a process lock or stopping the old process does not make an older
+SDK ratchet current; requiring fresh identity and membership is a precaution
+against sender-state rollback, not a cryptographic audit claim. Ordinary restarts
+retain the existing gateway identity and pairing.
+
+A server backup does not recover participant browser Marmot/MLS keys or state.
+Browser identity-only recovery is separate: it recovers the messaging identity,
+not a current group ratchet or authorization to resume old memberships. Keep the
+old browser/device closed during replacement and establish fresh memberships
+where state is lost or stale. Store recovery material in an encrypted offline
+location with access appropriate to your records.
 
 For the container edition, invoke `node ops/backup.js` inside the app with the same
 subcommands and mounted `/state/backups` paths. The keys are already passed by

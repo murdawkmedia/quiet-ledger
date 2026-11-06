@@ -1,7 +1,7 @@
-import type {Currency,InvoiceItem} from './contracts.js';
+import type {Currency,InvoiceBilling,InvoiceItem} from './contracts.js';
 import type {PaymentMethod} from './payment-methods.js';
 import {methodInfo} from './payment-methods.js';
-export interface InvoiceDraft {customerName:string;customerEmail?:string;title:string;currency:Currency;items:InvoiceItem[];taxBps?:number;issueDate?:string;dueDate?:string;discountBps?:number;premiumBps?:number;acceptedMethods?:PaymentMethod[];note?:string}
+export interface InvoiceDraft {customerName:string;customerEmail?:string;title:string;currency:Currency;items:InvoiceItem[];taxBps?:number;issueDate?:string;dueDate?:string;discountBps?:number;premiumBps?:number;acceptedMethods?:PaymentMethod[];note?:string;billing?:InvoiceBilling}
 export interface InvoiceTemplate {id:string;label:string;draft:InvoiceDraft}
 export const INVOICE_CURRENCIES=['CAD','USD','KRW','EUR','GBP'] as const;
 export function currencyScale(currency:string){return currency==='KRW'?1:100;}

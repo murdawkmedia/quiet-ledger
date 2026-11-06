@@ -12,6 +12,26 @@ const maxAmount = 1_000_000_000;
 export const token = () => randomBytes(32).toString('base64url');
 const amountSchema = z.number().int().min(1).max(maxAmount);
 const calendarDate=z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value=>{const d=new Date(value+'T00:00:00Z');return Number.isFinite(d.getTime())&&d.toISOString().slice(0,10)===value;},'Enter a valid calendar date.');
+const billingAddress=z.string().trim().max(1000).transform(value=>value||undefined).optional();
+const billingEmail=z.string().max(254)
+  .refine(value=>!/[\u0000-\u001f\u007f]/.test(value),'Use a single email address without control characters.')
+  .transform(value=>value.trim()).pipe(z.union([z.email(),z.literal('')]))
+  .transform(value=>value||undefined).optional();
+const invoiceBillingSchema=z.object({
+  sellerName:z.string().trim().min(1).max(120),
+  sellerEmail:billingEmail,
+  sellerAddress:billingAddress,
+  sellerTaxId:z.string().max(80)
+    .refine(value=>!/[\u0000-\u001f\u007f]/.test(value),'Use a tax identifier without control characters.')
+    .transform(value=>value.trim()||undefined).optional(),
+  customerAddress:billingAddress,
+}).strict().transform(value=>({
+  sellerName:value.sellerName,
+  ...(value.sellerEmail?{sellerEmail:value.sellerEmail}:{}),
+  ...(value.sellerAddress?{sellerAddress:value.sellerAddress}:{}),
+  ...(value.sellerTaxId?{sellerTaxId:value.sellerTaxId}:{}),
+  ...(value.customerAddress?{customerAddress:value.customerAddress}:{}),
+}));
 export const invoiceSchema = z.object({
   customerName: z.string().trim().min(1).max(120),
   customerEmail: z.string().trim().email().max(254).optional().or(z.literal('')),
@@ -25,6 +45,7 @@ export const invoiceSchema = z.object({
   items: z.array(z.object({ description: z.string().trim().min(1).max(240), quantity: z.number().int().min(1).max(10000), unitAmount: z.number().int().min(0).max(maxAmount) }).strict()).min(1).max(40),
   taxBps: z.number().int().min(0).max(10000).optional(),
   note: z.string().trim().max(2000).optional(),
+  billing:invoiceBillingSchema.optional(),
 }).strict().refine(value=>!value.issueDate||!value.dueDate||value.dueDate>=value.issueDate,'Due date must not precede the issue date.');
 
 export function parse<T>(schema: z.ZodType<T>, body: unknown): T {
@@ -55,8 +76,8 @@ export function createInvoice(store: Store, workspace: string, body: unknown, no
 }
 
 export function publicInvoice(invoice: Invoice): PublicInvoice {
-  const { number, title, customerName, currency, items, taxBps, subtotal, tax, total, amountSats, status, createdAt, issueDate, dueDate, discountBps,premiumBps,discountAmount,premiumAmount,acceptedMethods, paidAt, note, paymentMethod,settlementMode,nativePayment } = invoice;
-  return { number, title, customerName, currency, items, taxBps, subtotal, tax, total, amountSats, status, createdAt, issueDate, dueDate, discountBps,premiumBps,discountAmount,premiumAmount,acceptedMethods, paidAt, note, paymentMethod,settlementMode,nativePayment };
+  const { number, title, customerName, currency, items, taxBps, subtotal, tax, total, amountSats, status, createdAt, issueDate, dueDate, discountBps,premiumBps,discountAmount,premiumAmount,acceptedMethods, paidAt, note, billing, paymentMethod,settlementMode,nativePayment } = invoice;
+  return { number, title, customerName, currency, items, taxBps, subtotal, tax, total, amountSats, status, createdAt, issueDate, dueDate, discountBps,premiumBps,discountAmount,premiumAmount,acceptedMethods, paidAt, note, ...(billing?{billing:{...billing}}:{}), paymentMethod,settlementMode,nativePayment };
 }
 
 export function settleInvoice(store: Store, workspace: string, invoice: Invoice, method: PaymentMethod, now: Date) {

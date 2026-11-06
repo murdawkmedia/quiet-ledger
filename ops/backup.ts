@@ -18,6 +18,7 @@ export interface CreateBackupOptions extends BackupKeys {dbPath:string;outputDir
 export interface VerifyBackupOptions extends BackupKeys {backupPath:string}
 export interface BackupVerification {integrity:'ok';tables:number}
 export interface BackupResult {file:string;sha256:string;bytes:number}
+export interface RestoreResult extends BackupResult,BackupVerification {archiveSha256:string;communicationsReset:boolean}
 
 function keys(options:BackupKeys){
   if(!Buffer.isBuffer(options.storageKey)||options.storageKey.length!==32||!Buffer.isBuffer(options.backupKey)||options.backupKey.length!==32||timingSafeEqual(options.storageKey,options.backupKey))throw fail();
@@ -67,13 +68,13 @@ function inspectDatabase(path:string,storageKey:Buffer):BackupVerification{
   const store=new Store(path,{encryptionKey:storageKey});try{if(!store.encrypted)throw fail();}finally{store.close();}
   return {integrity:'ok',tables};
 }
-async function verifiedArchive(options:VerifyBackupOptions):Promise<{plain:Buffer;verification:BackupVerification}>{
+async function verifiedArchive(options:VerifyBackupOptions):Promise<{plain:Buffer;verification:BackupVerification;archiveSha256:string}>{
   const privateKeys=keys(options);let scratch:string|undefined,plain:Buffer|undefined;
   try{
     const encrypted=readBoundedPrivate(options.backupPath,MAX_BACKUP_BYTES+32,32);
     plain=decryptBackup(encrypted,privateKeys.backupKey,CONTEXT);if(plain.length<512||plain.length>MAX_BACKUP_BYTES)throw fail();
     scratch=privateScratch();const path=join(scratch,'snapshot.sqlite');exclusiveFile(path,plain);
-    const verification=inspectDatabase(path,privateKeys.storageKey);return {plain,verification};
+    const verification=inspectDatabase(path,privateKeys.storageKey);return {plain,verification,archiveSha256:createHash('sha256').update(encrypted).digest('hex')};
   }catch{plain?.fill(0);throw fail();}
   finally{privateKeys.storageKey.fill(0);privateKeys.backupKey.fill(0);removeScratch(scratch);}
 }
@@ -107,14 +108,39 @@ export async function verifyEncryptedBackup(options:VerifyBackupOptions):Promise
   const result=await verifiedArchive(options);try{return result.verification;}finally{result.plain.fill(0);}
 }
 
-/** Restores only to an explicitly chosen, nonexisting path. Never overwrites a running or existing database. */
-export async function restoreEncryptedBackup(options:VerifyBackupOptions&{outputPath:string}):Promise<BackupResult&BackupVerification>{
-  let result:Awaited<ReturnType<typeof verifiedArchive>>|undefined,scratch:string|undefined;
+/** Restore-only operation on our unpublished copy. An archived MLS sender must never silently resume. */
+function resetRestoredCommunications(path:string):boolean{
+  const db=new DatabaseSync(path,{defensive:true});
+  try{
+    const names=new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row=>String(row.name)));
+    const runtime=['marmot_gateway_identities','marmot_gateway_state','marmot_gateway_writers','email_marmot_gateways'].filter(table=>names.has(table));
+    const hasIntents=names.has('email_marmot_intents');
+    const changed=runtime.some(table=>Boolean(db.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get()))||Boolean(hasIntents&&db.prepare("SELECT 1 FROM email_marmot_intents WHERE state='prepared' LIMIT 1").get());
+    if(!changed)return false;
+    // Keep the completed restore in one file before publishing it. No WAL or
+    // inherited process lease can stand in for fresh membership after recovery.
+    db.exec('PRAGMA journal_mode=DELETE;BEGIN IMMEDIATE');
+    for(const table of runtime)db.exec(`DELETE FROM ${table}`);
+    // Retain the encrypted intent evidence, especially uncertain SMTP outcomes.
+    // Pending confirmations lose authority even if their old command is replayed.
+    if(hasIntents)db.exec("UPDATE email_marmot_intents SET state='cancelled' WHERE state='prepared'");
+    db.exec('COMMIT');
+    const integrity=db.prepare('PRAGMA integrity_check').all();if(integrity.length!==1||Object.values(integrity[0])[0]!=='ok')throw fail();
+    return true;
+  }catch(error){if(db.isTransaction)db.exec('ROLLBACK');throw error;}finally{db.close();}
+}
+
+/** Fresh destination only; archived persistent gateways require a new identity and explicit pairing. */
+export async function restoreEncryptedBackup(options:VerifyBackupOptions&{outputPath:string}):Promise<RestoreResult>{
+  let result:Awaited<ReturnType<typeof verifiedArchive>>|undefined,scratch:string|undefined,restored:Buffer|undefined;
   try{
     const outputPath=absolute(options.outputPath);privateDirectory(dirname(outputPath));
-    result=await verifiedArchive(options);scratch=privateScratch(dirname(outputPath));const staged=join(scratch,'restore.sqlite');exclusiveFile(staged,result.plain);linkSync(staged,outputPath);syncDirectory(dirname(outputPath));
-    return {...result.verification,file:outputPath,sha256:createHash('sha256').update(result.plain).digest('hex'),bytes:result.plain.length};
-  }catch{throw fail();}finally{result?.plain.fill(0);removeScratch(scratch);}
+    result=await verifiedArchive(options);scratch=privateScratch(dirname(outputPath));const staged=join(scratch,'restore.sqlite');exclusiveFile(staged,result.plain);
+    const communicationsReset=resetRestoredCommunications(staged);restored=readBoundedPrivate(staged,MAX_BACKUP_BYTES,512);
+    const fd=openSync(staged,constants.O_RDONLY|constants.O_NOFOLLOW);try{fsyncSync(fd);}finally{closeSync(fd);}
+    linkSync(staged,outputPath);syncDirectory(dirname(outputPath));
+    return {...result.verification,file:outputPath,sha256:createHash('sha256').update(restored).digest('hex'),bytes:restored.length,archiveSha256:result.archiveSha256,communicationsReset};
+  }catch{throw fail();}finally{result?.plain.fill(0);restored?.fill(0);removeScratch(scratch);}
 }
 
 function privateKeyFile(path:string|undefined){
@@ -130,7 +156,7 @@ async function cli(){
     }else if(command==='verify'){
       const path=process.env.BACKUP_FILE??process.argv[3];if(!path)throw fail();console.log(JSON.stringify(await verifyEncryptedBackup({backupPath:absolute(path),storageKey,backupKey})));
     }else if(command==='restore'){
-      const path=process.env.BACKUP_FILE??process.argv[3],outputPath=process.env.RESTORE_DB_PATH;if(!path||!outputPath)throw fail();const result=await restoreEncryptedBackup({backupPath:absolute(path),storageKey,backupKey,outputPath});console.log(JSON.stringify({integrity:result.integrity,tables:result.tables,bytes:result.bytes}));
+      const path=process.env.BACKUP_FILE??process.argv[3],outputPath=process.env.RESTORE_DB_PATH;if(!path||!outputPath)throw fail();const result=await restoreEncryptedBackup({backupPath:absolute(path),storageKey,backupKey,outputPath});console.log(JSON.stringify({integrity:result.integrity,tables:result.tables,bytes:result.bytes,sha256:result.sha256,archiveSha256:result.archiveSha256,communicationsReset:result.communicationsReset}));
     }else throw fail();
   }finally{storageKey?.fill(0);backupKey?.fill(0);}
 }

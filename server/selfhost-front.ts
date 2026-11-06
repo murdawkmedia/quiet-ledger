@@ -1,3 +1,4 @@
+import {MARMOT_RELAY_CSP} from '../shared/marmot-relays.js';
 import express, {type Express} from 'express';
 import type {IncomingMessage} from 'node:http';
 import {isIP} from 'node:net';
@@ -37,7 +38,7 @@ export function createSelfHostFrontend(api:Express,options:SelfHostFrontendOptio
   app.use((_req,res,next)=>{
     res.set('X-Content-Type-Options','nosniff');res.set('Referrer-Policy','no-referrer');res.set('X-Frame-Options','DENY');
     res.set('Permissions-Policy','camera=(), microphone=(), geolocation=()');res.set('X-Robots-Tag','noindex, nofollow');res.set('Cache-Control','no-store');
-    res.set('Content-Security-Policy',`default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ${websocketOrigin}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'`);
+    res.set('Content-Security-Policy',`default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ${websocketOrigin} ${MARMOT_RELAY_CSP}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'`);
     next();
   });
   const backend=(path:string)=>path==='/api'||path.startsWith('/api/')||path==='/marmot'||path.startsWith('/marmot/');

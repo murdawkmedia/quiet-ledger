@@ -1,0 +1,25 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {Readable} from 'node:stream';
+import * as gmail from '../server/gmail-mailbox.js';
+import type {FetchMessageObject,ImapFlowOptions} from 'imapflow';
+
+const credential={senderEmail:'merchant@example.test',appPassword:'abcdefghijklmnop'};
+const source=(extra='')=>Buffer.from('From: Fictional client <client@example.test>\r\nTo: merchant@example.test\r\nMessage-ID: <reply@client.example>\r\nIn-Reply-To: <root@ledger.example>\r\nReferences: <root@ledger.example>\r\nSubject: Invoice reply\r\nAuthentication-Results: attacker.example; dkim=pass header.d=client.example\r\n'+extra+'\r\n');
+function fake(){let options:ImapFlowOptions|undefined,closed=0;const fetches:unknown[][]=[],downloads:unknown[][]=[],opens:unknown[][]=[];const rows:FetchMessageObject[]=[{uid:10,seq:1,emailId:'gmail-immutable-id',headers:source(),bodyParts:new Map([['header',source()]]),size:1000000,flags:new Set(['\\Seen']),bodyStructure:{type:'multipart/mixed',childNodes:[{type:'multipart/alternative',part:'1',childNodes:[{type:'text/plain',part:'1.1',size:24},{type:'text/html',part:'1.2',size:200}]},{type:'application/pdf',part:'2',size:999000,disposition:'attachment'}]}}];let text='Plain reply only.';const client={connect:async()=>{},on:()=>client,mailboxOpen:async(...args:unknown[])=>{opens.push(args);return{uidValidity:123n,uidNext:11};},fetchAll:async(...args:unknown[])=>{fetches.push(args);return rows;},download:async(...args:unknown[])=>{downloads.push(args);return{meta:{contentType:'text/plain',expectedSize:text.length},content:Readable.from([Buffer.from(text)])};},close:()=>{closed++;}};return{rows,fetches,downloads,opens,client,factory:(value:ImapFlowOptions)=>{options=value;return client as unknown as gmail.GmailImapClient;},options:()=>options,closed:()=>closed,text:(value:string)=>{text=value;}};}
+
+test('Gmail adapter fixes TLS endpoints, bounded read-only header fetches and selected text parts',async()=>{
+ assert.equal(typeof gmail.createGmailMailbox,'function');const f=fake(),controller=new AbortController();const mailbox=gmail.createGmailMailbox(credential,{signal:controller.signal,clientFactory:f.factory});try{
+  const options=f.options()!;assert.equal(options.host,'imap.gmail.com');assert.equal(options.port,993);assert.equal(options.secure,true);assert.equal(options.logger,false);assert.equal(options.disableAutoIdle,true);assert.equal(options.tls?.rejectUnauthorized,true);assert.equal(options.tls?.minVersion,'TLSv1.2');assert.ok(options.maxLiteralSize!<=65536);assert.ok(options.maxResponseSize!<=262144);
+  assert.deepEqual(await mailbox.open('Quiet Ledger'),{uidValidity:'123',uidNext:11});assert.deepEqual(f.opens,[['Quiet Ledger',{readOnly:true}]]);const [header]=await mailbox.headers(10,10);assert.equal(header.providerId,'gmail-immutable-id');assert.equal(header.plainPart,'1.1');assert.equal(header.hasAttachments,true);assert.equal(header.malformed,false);assert.deepEqual(header.from,['client@example.test']);assert.deepEqual(header.references,['<root@ledger.example>']);assert.equal('authenticated' in header,false);
+  const query=f.fetches[0][1] as Record<string,unknown>;assert.equal(query.source,undefined);assert.equal(query.headers,undefined);assert.deepEqual(query.bodyParts,[{key:'HEADER',start:0,maxLength:16385}]);assert.deepEqual(f.fetches[0][2],{uid:true});const body=await mailbox.readText(10,'1.1');assert.equal(body.text,'Plain reply only.');assert.equal(f.downloads[0][1],'1.1');assert.deepEqual(f.downloads[0][2],{uid:true,maxBytes:32769,chunkSize:4096});await assert.rejects(mailbox.readText(10,'2'));assert.equal(f.downloads.length,1);
+ }finally{mailbox.close();}assert.equal(f.closed(),1);
+});
+
+test('untrusted duplicate headers, oversized headers and unsafe IDs fail closed without body fetch',async()=>{
+ assert.equal(typeof gmail.createGmailMailbox,'function');for(const bytes of [source('From: attacker@example.test\r\n'),source('Message-ID: <other@attacker.example>\r\n'),source('In-Reply-To: unsafe value\r\n'),Buffer.alloc(16385,65)]){const f=fake();f.rows[0].bodyParts=new Map([['header',bytes]]);const mailbox=gmail.createGmailMailbox(credential,{signal:new AbortController().signal,clientFactory:f.factory});try{await mailbox.open('Quiet Ledger');const [row]=await mailbox.headers(10,10);assert.equal(row.malformed,true);assert.deepEqual(f.downloads,[]);}finally{mailbox.close();}}
+});
+
+test('selected text is bounded and abort closes the owned adapter without real connections',async()=>{
+ assert.equal(typeof gmail.createGmailMailbox,'function');const f=fake(),controller=new AbortController(),mailbox=gmail.createGmailMailbox(credential,{signal:controller.signal,clientFactory:f.factory});try{await mailbox.open('Quiet Ledger');await mailbox.headers(10,10);f.text('x'.repeat(40000));const body=await mailbox.readText(10,'1.1');assert.equal(body.truncated,true);assert.ok(Buffer.byteLength(body.text)<=32768);controller.abort();assert.equal(f.closed(),1);await assert.rejects(mailbox.headers(10,10));}finally{mailbox.close();}assert.equal(f.closed(),1);
+});

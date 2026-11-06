@@ -1,71 +1,157 @@
-# Email an invoice
+# Send invoices and handle email replies
 
-Open **Invoices** and choose **Email** beside an invoice. The demo has the same
-entry under **Demo invoices**, with previews only. Email includes the invoice
-number, amount, optional message and private checkout link. It does not issue a
-payment or prove that a client received or read the message.
+Use your private account for email. The demo previews fictional messages only.
+Email includes the invoice number, amount, optional message and private checkout
+link. Submission, delivery, reading and invoice payment are separate outcomes.
 
-Choose an address from **Common recipients** or type custom addresses separated
-by commas. Suggestions come only from this workspace's saved contacts and prior
-invoice customer addresses. Save frequent contacts under **Email settings**.
-Set **My copy address** and optionally check **Send a copy to myself**. At most
-five addresses, including the copy, may receive one message. Review the preview
-before sending. The copy is CC and is visible to the other recipients.
+For native messaging and optional phone gateway setup, see
+[private invoices and conversations](REAL-INVOICING.md).
 
-## Send from your Gmail account
+## Connect your Gmail sender
 
-In a private workspace, enter your Gmail or Google Workspace sender address and
-a [Google App Password](https://support.google.com/accounts/answer/185833).
+Open **Invoices** and choose **Email** beside an invoice. Under **Email settings**,
+enter your Gmail or Google Workspace sender address and a
+[Google App Password](https://support.google.com/accounts/answer/185833).
 Google requires 2-Step Verification and may restrict App Passwords for some
 accounts. Use **Save and connect Gmail** to check authentication; this sends no
-test email. Your normal Google account password is not supported. If App
-Passwords are unavailable, use the mail app draft option instead.
+test email. A normal Google account password is not supported. If App Passwords
+are unavailable, use a mail app draft instead.
 
 The App Password is saved in encrypted, workspace-scoped server storage and is
-never returned by the settings API. The hosting operator retains decryption
-access. It is independent of the browser's passkey/Nostr sign-in and any agent
-model provider. Updating the sender/password requires a new authentication check.
-**Disconnect Gmail** removes the stored delivery credential for this workspace.
+never returned by the settings API. The server operator retains decryption
+access. This credential is independent of account passkey/Nostr sign-in and
+does not involve an AI provider. A changed sender/password needs a fresh check.
 
-After previewing, choose **Send invoice from…**. SMTP uses the fixed Google
-endpoint `smtp.gmail.com:465` with TLS, certificate checking, no file/URL
-attachments and a bounded overall timeout. An accepted result means Gmail
-accepted every listed recipient, not that the email was delivered or read.
+## Send an invoice
 
-A durable submission is reserved before contacting Gmail. Reusing its request
-key returns the stored result. A timeout, interrupted process or partial
-acceptance is shown as uncertain and is not automatically resent. Check Gmail
-before attempting another copy. Proven authentication failure is recorded as
-not sent and requires reconnecting. Recent submissions remain with the invoice.
+1. Choose a **Common recipients** suggestion or enter custom addresses separated
+   by commas. Suggestions use only this workspace's saved email recipients and
+   prior invoice customer addresses. Save frequent addresses in **Email settings**.
+2. Optionally set **My copy address** and check **Send a copy to myself**. This is
+   a visible CC. At most five addresses, including that copy, may receive the
+   initial invoice email.
+3. Prepare and review the preview. Check To, CC, sender, subject, message and link.
+4. Choose **Send invoice from…** to submit it through the connected sender.
 
-**Prepare mail app draft** works without an SMTP credential. It creates a
-`mailto:` draft containing the intended recipients, optional CC, subject and
-invoice link. Open it in your mail app, choose the sender, review and send it
-there. Preparing or opening this draft is never reported as email delivery.
+SMTP uses fixed `smtp.gmail.com:465` with TLS and certificate checking. The app
+does not attach files or fetch URL attachments. Gmail accepting every recipient
+means provider acceptance; it does not prove delivery or reading.
 
-## Demo and Marmot
+**Prepare mail app draft** creates a `mailto:` draft without an SMTP credential.
+Open it in your mail app, choose the sender, review it and send there. Preparing
+or opening the draft is never recorded as delivery. Replies to mail-app drafts
+are not automatically tracked by this inbox integration; tracked threads start
+from submissions recorded through the connected Quiet Ledger sender.
 
-Demo workspaces can save fictional contacts/copy addresses and preview messages.
-They cannot connect Gmail, open a mail draft through this flow or submit email.
-No email provider is contacted. Saved demo email settings follow the same
-30-day retention as the invoices and are removed only with their expired demo.
+### Review an uncertain submission
 
-An optional **Send myself a copy in Marmot / White Noise** control is labelled
-**Planned** and disabled. A future version may deliver an encrypted invoice or
-receipt notice to an explicitly paired owner inbox. No self-copy, White Noise
-pairing or public relay publication is implemented by this email feature.
-Existing invoice conversations remain a separate feature.
+Quiet Ledger saves the submission intent before contacting Gmail. An unchanged
+request retry returns that saved result. It does not automatically submit a new
+copy after a timeout, process interruption or partial acceptance.
 
-## Operator and integration notes
+If the result is uncertain or some recipients were rejected, inspect the sent
+mailbox and recipients first. In **Recent submissions**, choose the **Email review
+result**, enter an **Email review note**, then choose **Record email review**.
+Record either that you confirmed it was sent or confirmed it was not sent. This
+records your review and sends no email. A later copy needs a new preview and an
+explicit send; consider who may already have received the earlier submission.
+Proven authentication rejection is recorded as not sent and needs reconnection.
 
-The generic source contains no personal sender, default mailbox or credentials.
-Every hosted customer connects their own sender. SMTP credentials are excluded
-from invoice exports, chat/model context, API summaries and public source.
-Encrypted ledger backups include the private email settings and submission
-records; protect the separate recovery keys too.
+## Enable incoming invoice replies
 
-Browser-only routes are `/api/invoice-email/settings`,
-`/api/invoice-email/verify` and `/api/invoices/:id/email`. They require the existing
-session, invoice ownership and CSRF/origin checks on writes. Bearer/API/MCP
-credentials cannot send email or manage delivery settings. The trusted configured
-public origin supplies checkout links; callers cannot choose an arbitrary origin.
+Connecting SMTP does not enable mailbox reading. The same App Password can grant
+access to more of the mailbox than the selected folder; a folder filter limits
+what Quiet Ledger processes, not the credential's authority. A dedicated
+invoicing mailbox offers clearer separation.
+
+1. Open **Email inbox** after connecting Gmail.
+2. Check **Enable incoming invoice replies**. Set **Gmail folder or label** to
+   `INBOX` or an existing folder you use for invoicing.
+3. Choose **Save inbox settings** and let its initial check finish. This records
+   a baseline for new mail. It does not import the old inbox.
+4. Send the initial invoice through Quiet Ledger after that baseline exists.
+   Ask the client to press Reply in their ordinary mail app.
+5. Choose **Check new replies** when needed. The standard server also checks
+   enabled mailboxes in the background while it runs.
+
+IMAP uses fixed `imap.gmail.com:993` with TLS. Polls and message sizes are bounded.
+A changed mailbox UID validity creates a new baseline rather than importing old
+mail. Unrelated mail with no known invoice references is skipped. A matching
+subject alone is insufficient. Changed recipients, ambiguous references,
+automated replies, malformed content and unsupported bodies are held instead
+of becoming outgoing reply authority.
+
+The reader downloads a bounded plain-text body only for a matching candidate.
+It does not download HTML parts, attachments or remote images. Messages without
+a usable plain-text part cannot be imported as ordinary replies. An attachment
+indicator does not mean its files are available in Quiet Ledger.
+
+### Review and reply in the invoice thread
+
+Matching replies remain labelled **Unverified email** even after review. Email
+headers and addresses are not proof of who wrote them.
+
+1. Open **Email inbox** and review a reply marked **Needs review**.
+2. Choose **Approve reply** or **Reject reply**. Approval alone sends no response
+   and confirms no payment. Held records may have no importable body or invoice
+   association; handle those in the original mailbox.
+3. Open the invoice's **Thread**. Under **Reply by email**, select an approved
+   email and write the reply.
+4. Choose **Preview email reply**, review the complete To/CC/subject/body, then
+   choose **Send email reply**.
+
+Recipients and subject come from the original recorded invoice email. The app
+uses that approved reply's message ID for threading. It does not silently follow
+a new Reply-To address or add a new CC participant. If authority, mailbox or
+preview details change, prepare a new preview. Uncertain submissions follow the
+same mailbox-review rule as initial emails.
+
+The invoice thread also supports **Private note**. Saving one is a workspace
+record and sends nothing to the client.
+
+## Optional Marmot Email gateway
+
+An invoice's **Thread** has a separate opt-in Email gateway. Pair it with your own
+Marmot identity to review received email and explicitly reply from that client
+while the browser is closed. Follow the
+[gateway pairing and commands](REAL-INVOICING.md#pair-an-optional-email-gateway-with-your-phone).
+The gateway and Gmail can read bridged email. It does not make the client's
+email end-to-end encrypted, impersonate their Nostr identity or join native-only
+rooms automatically.
+
+Incoming email can appear in the paired owner room with `/approve` and `/reject`
+instructions. `/email` prepares a recipient/content preview; `/send` with its
+short-lived confirmation submits that exact email once. Plain chat cannot send
+mail or settle an invoice. Automatic Marmot self-copies of newly issued invoices
+and receipts are not implemented; use **Messages → Send invoice link** for an
+explicit initial share.
+
+## Disconnect, recovery and access
+
+Disable **Enable incoming invoice replies** to stop inbox reads. **Disconnect
+Gmail** removes the active delivery credential and disables its inbox integration.
+Disable an invoice's gateway separately to retire its email send authority.
+Disconnected mailbox settings, imported records, history and existing encrypted
+backups may remain. No disconnect recalls mail already accepted by Gmail.
+
+See [backup and recovery](SELF-HOSTING.md#backup-and-recovery) before restoring a
+server. Restore preserves invoice/mail records but resets gateway identity,
+group state and pairing and cancels prepared gateway confirmations. Stop the
+old installation before pairing a replacement. An unknown SMTP result remains
+unknown until you check the mailbox and record a review.
+
+Mailbox settings, initial sending, inbox review, thread replies and gateway setup
+are private browser actions with workspace ownership, session and CSRF/origin
+checks. API bearer keys and MCP cannot perform these email actions. Public
+checkout links use the server's configured origin.
+
+The generic source includes no sender address, mailbox credential or customer
+records. Automated email checks use controlled transports; an actual Gmail
+connection and controlled first send/reply remain owner acceptance steps.
+
+## Fictional demo
+
+The demo can save fictional email suggestions and copy addresses and prepare
+previews. It cannot connect Gmail, read an inbox, send email, use a gateway or open
+a mail draft through this flow. Its old Marmot self-copy control remains planned
+and disabled. Demo invoices and settings follow their separate 30-day retention.

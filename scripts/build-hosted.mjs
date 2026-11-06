@@ -1,3 +1,4 @@
+import {MARMOT_RELAY_CSP} from '../shared/marmot-relays.ts';
 import {build} from 'esbuild';
 import {mkdir,writeFile,readFile,copyFile,cp,rm} from 'node:fs/promises';
 import {resolve,relative,dirname,parse} from 'node:path';
@@ -14,7 +15,7 @@ await writeFile(resolve(output,'public/_headers'),`/*
   Referrer-Policy: no-referrer
   X-Frame-Options: DENY
   Permissions-Policy: camera=(), microphone=(), geolocation=()
-  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ${MARMOT_RELAY_CSP}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'
   X-Robots-Tag: noindex, nofollow
 /index.html
   Cache-Control: no-store
@@ -23,7 +24,7 @@ await writeFile(resolve(output,'public/_headers'),`/*
 `);
 await writeFile(resolve(output,'public/robots.txt'),'User-agent: *\nDisallow: /\n');
 const notices=[];
-for(const [name,file] of [['react','LICENSE'],['react-dom','LICENSE'],['lucide-react','LICENSE'],['@simplewebauthn/browser','LICENSE.md'],['@fontsource/dm-sans','LICENSE'],['@fontsource/lora','LICENSE'],['@internet-privacy/marmot-ts','LICENSE'],['@internet-privacy/marmot-ts','dist/vendor/ts-mls/LICENSE'],['nostr-tools','LICENSE'],['ws','LICENSE'],['nodemailer','LICENSE'],['@noble/curves','LICENSE'],['@noble/ciphers','LICENSE'],['@noble/hashes','LICENSE']]){
+for(const [name,file] of [['react','LICENSE'],['react-dom','LICENSE'],['lucide-react','LICENSE'],['@simplewebauthn/browser','LICENSE.md'],['@fontsource/dm-sans','LICENSE'],['@fontsource/lora','LICENSE'],['@internet-privacy/marmot-ts','LICENSE'],['@internet-privacy/marmot-ts','dist/vendor/ts-mls/LICENSE'],['nostr-tools','LICENSE'],['ws','LICENSE'],['nodemailer','LICENSE'],['qrcode','license'],['@noble/curves','LICENSE'],['@noble/ciphers','LICENSE'],['@noble/hashes','LICENSE']]){
   notices.push('--- '+name+' ---\n'+await readFile(resolve(root,'node_modules',name,file),'utf8'));
 }
 // Marmot vendors ts-mls and adds its own dependency tree. Include each exact

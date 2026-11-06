@@ -5,7 +5,7 @@ for(const viewport of [{width:1440,height:900},{width:390,height:844}]){
   const {invoiceId}=await page.request.post('/fixture/owner').then(response=>response.json());
   await page.goto('/invoices/'+invoiceId+'/email');
   await expect(page.getByRole('heading',{name:'Email your invoice.',exact:true})).toBeVisible();
-  const rows=page.locator('.invoice-email-checkbox');await expect(rows).toHaveCount(2);
+  const rows=page.locator('.invoice-email-checkbox');await expect(rows).toHaveCount(1);
   const boxes=await rows.evaluateAll(labels=>labels.map(label=>{const input=label.querySelector('input')!;return{inputWidth:input.getBoundingClientRect().width,inputHeight:input.getBoundingClientRect().height,labelHeight:label.getBoundingClientRect().height};}));
   console.log(JSON.stringify({viewport:viewport.width,checkboxes:boxes}));
   for(const box of boxes){expect(box.inputWidth).toBeGreaterThanOrEqual(14);expect(box.inputWidth).toBeLessThanOrEqual(24);expect(box.inputHeight).toBeLessThanOrEqual(24);expect(box.labelHeight).toBeLessThan(100);}

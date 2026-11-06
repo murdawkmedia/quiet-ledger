@@ -10,6 +10,13 @@ import { Store, DomainError, hash, type StoredSession } from './store.js';
 import { createInvoice, createQuote, approvePayout, advancePayout, settleInvoice, publicInvoice, seedDemo, parse, token } from './domain.js';
 import { SquareSandbox,type SquareSandboxOptions } from './square-sandbox.js';
 import {InvoiceTemplates} from './invoice-templates.js';
+import {createClientThreadsRouter} from './client-threads-router.js';
+import {InvoiceThreads} from './invoice-threads.js';
+import {InvoiceEmailInbox,type InvoiceEmailInboxOptions} from './email-inbox.js';
+import {createEmailInboxRouter} from './email-inbox-router.js';
+import {ThreadEmailService} from './thread-email.js';
+import {createCommunicationsRuntime,type CommunicationsRuntimeOptions} from './communications-runtime.js';
+import {createEmailGatewayRouter} from './email-gateway-router.js';
 import {InvoiceDelivery,type InvoiceDeliveryOptions} from './invoice-delivery.js';
 import {invoiceAllowsMethod,invoiceRequiresManualReport} from '../shared/invoice-options.js';
 import {PaymentReports} from './payment-reports.js';
@@ -34,6 +41,8 @@ import type {Invoice,Receipt} from '../shared/contracts.js';
 export interface AppOptions {
   dbPath: string;
   invoiceEmail?:InvoiceDeliveryOptions;
+  emailInbox?:Omit<InvoiceEmailInboxOptions,'threads'|'credentialFor'|'now'>;
+  communications?:{background?:boolean;networkFactory?:CommunicationsRuntimeOptions['networkFactory']};
   demoTeam?:Omit<DemoTeamOptions,'store'|'now'|'getSession'|'getDemoCase'|'publicOrigin'>;
   ownerToken?: string;
   encryptionKey?:Buffer;
@@ -109,7 +118,14 @@ export function createApp(options: AppOptions) {
   const squareSandbox=new SquareSandbox(store,options.squareSandbox,now);
   const paymentReports=new PaymentReports(store);
   const invoiceTemplates=new InvoiceTemplates(store);
-  const invoiceEmail=new InvoiceDelivery(store,{...options.invoiceEmail,publicOrigin:hosted?.publicOrigin??options.invoiceEmail?.publicOrigin??'http://localhost:4317',allowInsecureLoopback:hosted?.allowInsecureLoopback??options.invoiceEmail?.allowInsecureLoopback??!hosted,now});
+  let emailInbox:InvoiceEmailInbox;
+  const invoiceEmail=new InvoiceDelivery(store,{...options.invoiceEmail,publicOrigin:hosted?.publicOrigin??options.invoiceEmail?.publicOrigin??'http://localhost:4317',allowInsecureLoopback:hosted?.allowInsecureLoopback??options.invoiceEmail?.allowInsecureLoopback??!hosted,now,
+    onReserved:(workspace,id,result)=>{options.invoiceEmail?.onReserved?.(workspace,id,result);emailInbox.trackOutbound(workspace,id,result);},
+    onCompleted:(workspace,id,result)=>{options.invoiceEmail?.onCompleted?.(workspace,id,result);if(result.state!=='not_sent')emailInbox.trackOutbound(workspace,id,result);}});
+  const invoiceThreads=new InvoiceThreads(store,now);
+  emailInbox=new InvoiceEmailInbox(store,{...options.emailInbox,now,threads:invoiceThreads,credentialFor:workspace=>invoiceEmail.credentialForInbox(workspace)});
+  const threadEmail=new ThreadEmailService(store,{delivery:invoiceEmail,inbox:emailInbox,threads:invoiceThreads,now});
+  const communications=store.encrypted?createCommunicationsRuntime({store,inbox:emailInbox,threads:invoiceThreads,replies:threadEmail,delivery:invoiceEmail,now,networkFactory:options.communications?.networkFactory}):undefined;
   const receiving=new ReceivingService(store,hosted?[manualReceiving]:options.receivingAdapters??[],options.receivingQuote??quoteReceiving,now);
   const demoReceiving=hosted?new ReceivingService(store,[],options.receivingQuote??quoteReceiving,now):undefined;
   const accountConnections=hosted?createAccountConnections({store,publicOrigin:hosted.publicOrigin,now,getSession:(_req,res)=>res.locals.session,fetcher:options.connectionFetcher,allowInsecureLoopback:hosted.allowInsecureLoopback}):undefined;
@@ -136,9 +152,11 @@ export function createApp(options: AppOptions) {
     getSession:(_req,res)=>{const session=res.locals.session as StoredSession|undefined;return demoEnabled&&session&&hackathonDemo!.sessionValid(session)?session:undefined;},
     getDemoCase:workspace=>{if(!demoEnabled)throw new DomainError(403,'The hackathon demo is disabled.');return hackathonDemo!.view(workspace);}}):undefined;
   app.locals.demoTeam=demoTeam;
+  app.locals.communications=communications;
   let storeClosed=false;const closeStore=()=>{if(!storeClosed){storeClosed=true;store.close();}};
-  app.locals.close = () => {void demoTeam?.close();closeStore();};
-  app.locals.closeAsync=async()=>{await demoTeam?.close();closeStore();};
+  app.locals.close = () => {communications?.stop();void demoTeam?.close();if(communications?.busy)void communications.close().finally(closeStore);else{void communications?.close();closeStore();}};
+  app.locals.closeAsync=async()=>{await communications?.close();await demoTeam?.close();closeStore();};
+  if(store.encrypted&&options.communications?.background)communications?.start();
   const allowedHosts = new Set((options.allowedHosts ?? ['localhost', '127.0.0.1', '[::1]']).map(host => host.toLowerCase()));
   app.use((req, _res, next) => {
     const host = req.get('host');
@@ -335,12 +353,16 @@ export function createApp(options: AppOptions) {
   app.get('/api/invoice-templates',(_req,res)=>{if(res.locals.apiAccess)throw new DomainError(403,'Use a browser session for invoice templates.');res.json({templates:invoiceTemplates.list((res.locals.session as StoredSession).workspace)});});
   app.post('/api/invoice-templates',(req,res)=>{if(res.locals.apiAccess)throw new DomainError(403,'Use a browser session for invoice templates.');res.status(201).json({template:invoiceTemplates.save((res.locals.session as StoredSession).workspace,req.body)});});
   app.delete('/api/invoice-templates/:id',(req,res)=>{if(res.locals.apiAccess)throw new DomainError(403,'Use a browser session for invoice templates.');res.json(invoiceTemplates.remove((res.locals.session as StoredSession).workspace,param(req,'id')));});
+  app.use(createClientThreadsRouter(store,now));
+  app.use(createEmailInboxRouter(store,emailInbox,threadEmail));
+  if(communications)app.use(createEmailGatewayRouter(store,emailInbox,communications.gateway));
   const emailAccess=(res:Response)=>{if(res.locals.apiAccess)throw new DomainError(403,'Use a browser session for invoice emails.');const session=res.locals.session as StoredSession;return{workspace:session.workspace,context:{demo:session.role!=='owner'}};};
   app.get('/api/invoice-email/settings',(_req,res)=>{const {workspace}=emailAccess(res);res.json({settings:invoiceEmail.settings(workspace)});});
-  app.post('/api/invoice-email/settings',(req,res)=>{const {workspace,context}=emailAccess(res);res.json({settings:invoiceEmail.saveSettings(workspace,req.body,context)});});
+  app.post('/api/invoice-email/settings',(req,res)=>{const {workspace,context}=emailAccess(res);const settings=invoiceEmail.saveSettings(workspace,req.body,context);if(!context.demo&&(req.body?.disconnectGmail||!settings.gmailConfigured))emailInbox.disconnect(workspace);res.json({settings});});
   app.post('/api/invoice-email/verify',async(req,res)=>{parse(z.object({}).strict(),req.body??{});const {workspace,context}=emailAccess(res);res.json({settings:await invoiceEmail.verifyGmail(workspace,context)});});
   app.get('/api/invoices/:id/email',(req,res)=>{const {workspace,context}=emailAccess(res);res.json(invoiceEmail.view(workspace,param(req,'id'),context));});
-  app.post('/api/invoices/:id/email',async(req,res)=>{const {workspace,context}=emailAccess(res),id=param(req,'id'),key=idempotencyKey(req);sendResult(res,req.body?.action==='send'?await invoiceEmail.send(workspace,id,req.body,key,context):invoiceEmail.compose(workspace,id,req.body,key,context));});
+  app.post('/api/invoices/:id/email',async(req,res)=>{const {workspace,context}=emailAccess(res),id=param(req,'id'),key=idempotencyKey(req);const result=req.body?.action==='send'?await invoiceEmail.send(workspace,id,req.body,key,context):invoiceEmail.compose(workspace,id,req.body,key,context);sendResult(res,result);});
+  app.post('/api/invoices/:id/email/:deliveryId/resolve',(req,res)=>{const {workspace,context}=emailAccess(res);sendResult(res,invoiceEmail.resolve(workspace,param(req,'id'),param(req,'deliveryId'),req.body,context));});
   if(demoTeam)app.use(demoTeam.router);
   if(accountKeys)app.use(accountKeys.router);
   if(accountConnections)app.use(accountConnections.router);

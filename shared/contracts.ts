@@ -2,14 +2,22 @@ export type Currency = 'CAD' | 'USD' | 'EUR' | 'GBP' | 'KRW';
 export type {PaymentMethod} from './payment-methods.js';
 import type {PaymentMethod} from './payment-methods.js';
 export interface InvoiceItem { description: string; quantity: number; unitAmount: number }
+/** Billing details captured when the invoice is issued; later contact edits do not change them. */
+export interface InvoiceBilling {
+  sellerName:string;
+  sellerEmail?:string;
+  sellerAddress?:string;
+  sellerTaxId?:string;
+  customerAddress?:string;
+}
 export interface Invoice {
   id: string; number: string; token: string; title: string; customerName: string;
   customerEmail?: string; issueDate?: string; dueDate?: string; discountBps?:number; premiumBps?:number; discountAmount?:number; premiumAmount?:number; acceptedMethods?:PaymentMethod[]; currency: Currency; items: InvoiceItem[]; taxBps: number;
   subtotal: number; tax: number; total: number; totalCad: number; amountSats: number;
   status: 'open' | 'paid'; paymentMethod?: PaymentMethod; createdAt: string;
-  paidAt?: string; note?: string; receiptToken?: string; settlementMode?:'simulation'|'live'; nativePayment?:{asset:string;atomicAmount:string;network:string;paymentId:string;verification:'provider'|'manual'};
+  paidAt?: string; note?: string; billing?:InvoiceBilling; receiptToken?: string; settlementMode?:'simulation'|'live'; nativePayment?:{asset:string;atomicAmount:string;network:string;paymentId:string;verification:'provider'|'manual'};
 }
-export type PublicInvoice = Pick<Invoice, 'number' | 'title' | 'customerName' | 'currency' | 'items' | 'taxBps' | 'subtotal' | 'tax' | 'total' | 'amountSats' | 'status' | 'createdAt' | 'issueDate' | 'discountBps' | 'premiumBps' | 'discountAmount' | 'premiumAmount' | 'acceptedMethods' | 'dueDate' | 'paidAt' | 'note' | 'paymentMethod' | 'settlementMode' | 'nativePayment'>;
+export type PublicInvoice = Pick<Invoice, 'number' | 'title' | 'customerName' | 'currency' | 'items' | 'taxBps' | 'subtotal' | 'tax' | 'total' | 'amountSats' | 'status' | 'createdAt' | 'issueDate' | 'discountBps' | 'premiumBps' | 'discountAmount' | 'premiumAmount' | 'acceptedMethods' | 'dueDate' | 'paidAt' | 'note' | 'billing' | 'paymentMethod' | 'settlementMode' | 'nativePayment'>;
 export interface Receipt {
   number: string; issuedAt: string; mode: 'simulation'|'live'; method: PaymentMethod; nativePayment?:Invoice['nativePayment'];
   amount: number; currency: Currency; amountSats?: number; invoiceNumber: string;

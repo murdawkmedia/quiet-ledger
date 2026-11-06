@@ -12,7 +12,7 @@
     "typecheck": "tsc --noEmit",
     "build": "npm run typecheck && vite build",
     "test": "tsx --test tests/*.test.ts",
-    "test:e2e": "playwright test && playwright test --config tests/hardening-browser.config.ts && npm run test:e2e:accounts && npm run test:e2e:passkeys && npm run test:e2e:connections && npm run test:e2e:saved-connections && npm run test:e2e:marmot && npm run test:e2e:email",
+    "test:e2e": "playwright test && playwright test --config tests/hardening-browser.config.ts && npm run test:e2e:accounts && npm run test:e2e:passkeys && npm run test:e2e:connections && npm run test:e2e:saved-connections && npm run test:e2e:marmot && npm run test:e2e:email && npm run test:e2e:business && npm run test:e2e:messages && npm run test:e2e:inbox",
     "test:e2e:core": "playwright test",
     "test:e2e:adversarial": "playwright test --config tests/hardening-browser.config.ts",
     "mcp": "node --import tsx server/mcp.ts",
@@ -22,7 +22,10 @@
     "test:e2e:connections": "playwright test --config tests/connections-ui.config.ts",
     "test:e2e:saved-connections": "playwright test --config tests/saved-connections-browser.config.ts",
     "test:e2e:marmot": "playwright test --config tests/conversations-ui.config.ts && playwright test --config tests/marmot-demo-browser.config.ts",
-    "test:e2e:email": "playwright test --config tests/invoice-email-browser.config.ts"
+    "test:e2e:email": "playwright test --config tests/invoice-email-browser.config.ts",
+    "test:e2e:business": "playwright test --config tests/invoice-editor-ui.config.ts && playwright test --config tests/client-threads-browser.config.ts",
+    "test:e2e:messages": "playwright test --config tests/production-messages-browser.config.ts",
+    "test:e2e:inbox": "playwright test --config tests/email-inbox-browser.config.ts"
   },
   "dependencies": {
     "@fontsource/dm-sans": "5.3.0",
@@ -33,7 +36,9 @@
     "@simplewebauthn/server": "14.0.3",
     "bolt11": "1.4.2",
     "express": "5.3.0",
+    "imapflow": "2.10.2",
     "lucide-react": "1.68.0",
+    "mailparser": "3.14.2",
     "nodemailer": "10.3.1",
     "nostr-tools": "2.25.5",
     "qrcode": "1.5.4",
@@ -45,6 +50,7 @@
   "devDependencies": {
     "@playwright/test": "1.64.1",
     "@types/express": "5.0.6",
+    "@types/mailparser": "3.9.0",
     "@types/node": "26.6.6",
     "@types/qrcode": "1.5.6",
     "@types/react": "19.3.0",

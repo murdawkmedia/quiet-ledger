@@ -28,7 +28,7 @@ async function signup(f:ReturnType<typeof fixture>){
 }
 test('standalone front serves built routes/assets and securely delegates account API without a vendor proxy',async()=>{
  const f=fixture();try{
-  const home=await request(f.app).get('/');assert.equal(home.status,200);assert.match(home.text,/Fictional self-host build/);assert.match(home.headers['content-security-policy'],/connect-src 'self'/);assert.match(home.headers['content-security-policy'],/frame-ancestors 'none'/);assert.equal(home.headers['referrer-policy'],'no-referrer');assert.equal(home.headers['cache-control'],'no-store');
+  const home=await request(f.app).get('/');assert.equal(home.status,200);assert.match(home.text,/Fictional self-host build/);assert.match(home.headers['content-security-policy'],/connect-src 'self'/);assert.ok(home.headers['content-security-policy'].includes('wss://relay.us.whitenoise.chat'));assert.ok(home.headers['content-security-policy'].includes('wss://relay.eu.whitenoise.chat'));assert.match(home.headers['content-security-policy'],/frame-ancestors 'none'/);assert.equal(home.headers['referrer-policy'],'no-referrer');assert.equal(home.headers['cache-control'],'no-store');
   assert.equal((await request(f.app).get('/conversations')).status,200);assert.equal((await request(f.app).get('/asset.js')).status,200);
   const health=await request(f.app).get('/api/health').set('x-quiet-ledger-proxy','attacker-supplied').set('x-quiet-ledger-client-ip','203.0.113.66');assert.equal(health.status,200);assert.equal(health.body.authMode,'hosted');assert(!JSON.stringify(health.headers).includes(proxy));
   assert.equal((await request(f.api).get('/api/health')).status,403);assert.equal((await request(f.app).get('/api/nonexistent')).status,401);
