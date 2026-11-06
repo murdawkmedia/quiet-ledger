@@ -2446,6 +2446,18 @@
             "minimum": 0,
             "maximum": 1000000000,
             "description": "Unit price in currency minor units: 1200 means CAD 12.00 or KRW 1200."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "service",
+              "expense"
+            ],
+            "description": "Service/labour lines are eligible for invoice discounts and premiums by default. Expense/reimbursement lines are excluded. Omitted kind keeps the legacy eligible default."
+          },
+          "adjustmentEligible": {
+            "type": "boolean",
+            "description": "Explicitly override whether discounts and premiums apply to this line. False excludes it, including a service line."
           }
         },
         "required": [

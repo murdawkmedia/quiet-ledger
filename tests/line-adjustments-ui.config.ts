@@ -1,0 +1,3 @@
+import {defineConfig} from '@playwright/test';
+import {resolve} from 'node:path';
+export default defineConfig({testDir:'.',testMatch:'line-adjustments-ui.spec.ts',workers:1,timeout:20000,expect:{timeout:4000},outputDir:'.runtime/line-adjustments-ui-results',reporter:[['list']],use:{baseURL:'http://127.0.0.1:4353',browserName:'chromium',headless:true,timezoneId:'America/Edmonton',launchOptions:{executablePath:'/usr/bin/chromium'}},webServer:{command:'node --import tsx tests/line-adjustments-ui-app.ts',cwd:resolve(import.meta.dirname,'..'),url:'http://127.0.0.1:4353/tests/fixtures/line-adjustments-ui.html',reuseExistingServer:false}});

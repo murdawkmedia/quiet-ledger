@@ -85,3 +85,13 @@ test('application mount retains same-origin, CSRF and browser-only API boundarie
   }
  }finally{app.locals.close();}
 });
+
+
+test('statement retains explicit line adjustment choices without changing saved invoice totals',async()=>{
+ const f=fixture();try{
+  const items=[{description:'Fictional labour',quantity:1,unitAmount:200000,kind:'service' as const,adjustmentEligible:true},{description:'Fictional flights',quantity:1,unitAmount:80000,kind:'expense' as const,adjustmentEligible:false}];
+  const invoice=createInvoice(f.store,workspace,{...input,items,discountBps:500},new Date('2026-11-06T12:00:00Z'));
+  const before=snapshot(f.store),response=await f.post('statement',{invoiceIds:[invoice.id]}).expect(200);
+  assert.deepEqual(response.body.invoices[0].invoice.items,items);assert.equal(response.body.invoices[0].invoice.discountAmount,10000);assert.equal(response.body.invoices[0].invoice.total,270000);assert.equal(response.body.invoices[0].balance.due,270000);assert.deepEqual(snapshot(f.store),before);
+ }finally{f.close();}
+});

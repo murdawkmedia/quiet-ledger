@@ -283,3 +283,11 @@ max2000characters). The server computes dueDate and rejects inconsistent explici
 dates. Invoice readback includes those fields without checkout/receipt tokens.
 Recurring drafts and statement/CSV preview remain owner-browser tools; they are
 not new MCP authority or automatic sending/charging operations.
+
+
+Invoice items also accept optional `kind` (`service` or `expense`) and
+`adjustmentEligible` (boolean). An explicit eligibility value takes precedence;
+otherwise expenses are excluded and services/legacy untyped lines are eligible.
+Discount and premium percentages apply only to that eligible subtotal. Invoice
+readback and statement snapshots preserve explicit choices. Existing issued
+invoice totals are never recomputed from newer template settings.

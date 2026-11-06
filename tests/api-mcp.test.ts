@@ -250,3 +250,10 @@ test('MCP partial receiving passes the exact minor-unit amount and rejects fract
   assert.equal((await p.client.callTool({name:'create_receive_request',arguments:{...args,amount:1.5}})).isError,true);assert.equal(count,1);
  }finally{await p.close();}
 });
+
+test('MCP preserves explicit line kinds and adjustment eligibility',async()=>{
+ let sent:Record<string,unknown>|undefined;
+ const args={customerName:'Fictional travel client',title:'Labour and fixed flights',currency:'CAD',items:[{description:'Fictional labour',quantity:1,unitAmount:200000,kind:'service',adjustmentEligible:true},{description:'Fictional fixed flights',quantity:1,unitAmount:80000,kind:'expense',adjustmentEligible:false}],discountBps:500,acceptedMethods:['bitcoin','lightning']};
+ const p=await protocol(new LedgerApiClient({token,fetcher:async(_input,init)=>{sent=JSON.parse(String(init?.body));return Response.json({...invoice,...sent,total:270000});}}));
+ try{const result=await p.client.callTool({name:'create_invoice',arguments:{...args,idempotencyKey:'fictional-line-eligibility'}});assert.notEqual(result.isError,true);assert.deepEqual(sent,args);assert.deepEqual((result.structuredContent as any).invoice.items,args.items);assert.equal((result.structuredContent as any).invoice.token,undefined);}finally{await p.close();}
+});

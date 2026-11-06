@@ -46,7 +46,7 @@ export const invoiceSchema = z.object({
   premiumBps:z.number().int().min(0).max(10000).optional(),
   acceptedMethods:z.array(z.enum(PAYMENT_METHOD_IDS)).min(1).max(PAYMENT_METHOD_IDS.length).refine(value=>new Set(value).size===value.length,'Select each accepted method only once.').optional(),
   currency: z.enum(['CAD', 'USD', 'EUR', 'GBP','KRW']),
-  items: z.array(z.object({ description: z.string().trim().min(1).max(240), quantity: z.number().int().min(1).max(10000), unitAmount: z.number().int().min(0).max(maxAmount) }).strict()).min(1).max(40),
+  items: z.array(z.object({ description: z.string().trim().min(1).max(240), quantity: z.number().int().min(1).max(10000), unitAmount: z.number().int().min(0).max(maxAmount), kind:z.enum(['service','expense']).optional(), adjustmentEligible:z.boolean().optional() }).strict()).min(1).max(40),
   taxBps: z.number().int().min(0).max(10000).optional(),
   note: z.string().trim().max(2000).optional(),
   billing:invoiceBillingSchema.optional(),

@@ -23,10 +23,22 @@ Choose **New invoice**, fill in the client, and choose issue and due dates using
 the date pickers. A due date cannot precede the issue date. CAD, USD, EUR and GBP
 use two decimal places; KRW uses whole won. Choose the invoice currency explicitly.
 
-Each line has a description, quantity and unit price. Discount and premium
-percentages are separate optional invoice adjustments. They apply to the line
-subtotal, and tax applies after those adjustments. The displayed breakdown and
-server use the same exact integer calculation.
+Each line has a description, quantity, unit price and **Line type**. Service/labour
+lines start with **Apply discounts and premiums** checked. Expense/reimbursement
+lines start unchecked, so fixed costs such as flights keep their full price. You
+can override the checkbox on either type of line.
+
+Discount and premium percentages apply only to eligible lines. For example,
+CAD 2,000 labour plus CAD 800 flights with a 5% discount on labour totals CAD 2,700
+before tax: labour gets CAD 100 off and flights remain CAD 800. Tax still applies
+to the adjusted invoice subtotal. The browser and server use the same integer
+calculation. Saved templates and recurring snapshots retain each line's choices;
+issued invoices retain their captured totals. Older lines without these fields
+keep their original eligible behavior.
+
+These controls set the invoice's agreed price. They do not automatically choose a
+discount after a payer selects Bitcoin or another method at checkout. For a
+Bitcoin-only offer, choose that invoice's accepted methods when preparing it.
 
 Under **Billing details**, enter your business name, email, address, optional tax
 registration number and the customer's billing address. A business name is

@@ -3,7 +3,7 @@ export type {PaymentMethod} from './payment-methods.js';
 import type {PaymentMethod} from './payment-methods.js';
 import type {InvoiceBalance} from './invoice-ledger.js';
 import type {CurrencyBalanceSummary,CAD_REFERENCE_VALUATION} from './currency-report.js';
-export interface InvoiceItem { description: string; quantity: number; unitAmount: number }
+export interface InvoiceItem { description: string; quantity: number; unitAmount: number; kind?:'service'|'expense'; adjustmentEligible?:boolean }
 /** Billing details captured when the invoice is issued; later contact edits do not change them. */
 export interface InvoiceBilling {
   sellerName:string;

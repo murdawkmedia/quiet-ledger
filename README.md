@@ -63,6 +63,10 @@ receiving and redemption remain unimplemented.
 
 ## Features and boundaries
 
+Invoice discounts and premiums can exclude fixed expenses such as flights while
+applying to labour. Each line has an editable eligibility setting; templates and
+recurring drafts keep it. See [invoice controls](docs/INVOICES.md).
+
 - Private passkey/Nostr accounts, encrypted record payloads, scoped API and MCP.
 - [Saved clients and invoice templates](docs/INVOICES.md), billing details captured
   at issue time, invoice/receipt printing, CAD/USD/KRW/EUR/GBP, discounts, premiums,
