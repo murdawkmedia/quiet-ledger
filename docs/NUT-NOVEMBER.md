@@ -21,8 +21,8 @@ That baseline has private passkey/Nostr accounts, encrypted invoice records,
 CAD/USD/KRW pricing, printable invoices, payment requests and receipts, API/MCP,
 Marmot conversations and reviewed threaded email. Its Cashu catalog entry and
 manual instructions do not establish ecash settlement. The live fictional demo
-uses explicitly simulated payments. The newer private-account screens are in
-source; their hosted frontend rollout is pending.
+uses explicitly simulated payments. At registration preparation, the newer
+private-account screens had not completed their hosted rollout.
 
 Existing configured Lightning adapters can verify their own invoices. A Cashu
 wallet can use its mint to pay a Lightning invoice through
@@ -41,7 +41,11 @@ produces one Lightning receipt after independent verification.
 Controlled tests cover adapter validation, exact QR/copy, expiry, reload and
 receipt provenance. Funded interoperability with an independently operated Cashu
 wallet/mint remains pending. This is guidance to an external wallet, not a direct
-ecash receiver. Hosted availability is a separate rollout step.
+ecash receiver. On November 6 the reviewed frontend and backend were published
+at [Quiet Ledger](https://quiet-ledger-dyp.pages.dev), application source
+`db8e47ca236eb05f504751e4c1a870dd22a8b569`. All served client assets matched the
+build. Hosted browser checks used fictional payment responses; they did not
+establish funded wallet/mint interoperability.
 
 ## Proposed November delivery
 
