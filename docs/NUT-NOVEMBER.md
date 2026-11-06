@@ -26,10 +26,22 @@ source; their hosted frontend rollout is pending.
 
 Existing configured Lightning adapters can verify their own invoices. A Cashu
 wallet can use its mint to pay a Lightning invoice through
-[NUT-05](https://cashubtc.github.io/nuts/05/). Quiet Ledger does not currently
-provide a dedicated Cashu wallet handoff or direct ecash receiver. A Lightning
-receiver cannot establish that the payer funded a payment with Cashu, so such a
-receipt must continue to say Lightning.
+[NUT-05](https://cashubtc.github.io/nuts/05/). A Lightning receiver cannot establish
+that the payer funded a payment with Cashu, so such a receipt stays Lightning.
+
+## First implemented November slice
+
+The [external-wallet guide](CASHU-WALLET.md) reuses the exact validated mainnet
+Lightning invoice and amount, with copy and a locally generated QR. Supported
+LND and automatically verifiable LNURL receivers advertise it on new requests.
+Manual/test/review/expired requests do not. Opening the guide allocates nothing,
+contacts no mint and cannot settle a payment. The original provider check still
+produces one Lightning receipt after independent verification.
+
+Controlled tests cover adapter validation, exact QR/copy, expiry, reload and
+receipt provenance. Funded interoperability with an independently operated Cashu
+wallet/mint remains pending. This is guidance to an external wallet, not a direct
+ecash receiver. Hosted availability is a separate rollout step.
 
 ## Proposed November delivery
 

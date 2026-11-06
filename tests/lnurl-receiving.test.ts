@@ -51,6 +51,7 @@ test('LNURL creates exact mainnet invoices and shares repeated/concurrent calls 
   const f=fixture(),c=context(),[intent,again]=await Promise.all([f.adapter.create(c),f.adapter.create(c)]);
   assert.equal(f.adapter.mode,'live');assert.deepEqual(f.adapter.methods,['lightning']);assert.deepEqual(again,intent);
   assert.equal(intent.request,`lightning:${f.state.callback.pr}`);assert.equal(intent.network,'mainnet');assert.equal(intent.asset,'BTC');
+  assert.equal(intent.cashuWalletHandoff,true);assert.equal(intent.expiresAt,new Date((sec+3600)*1000).toISOString());
   assert.equal(intent.allocationKey,`lightning:mainnet:${hash}`);assert(!JSON.stringify(intent).includes(preimage));
   assert.equal(f.state.calls.filter(c=>new URL(c.url).pathname==='/callback').length,1);
   assert.equal(new URL(f.state.calls[1].url).searchParams.get('amount'),'10000000');
@@ -67,7 +68,7 @@ test('Lightning Address resolves LUD16 and requires matching metadata identity',
 test('explicit local HTTP fixture and explicit testnet remain available and separate',async()=>{
   const f=fixture();f.state.metadata.callback='http://127.0.0.1:9000/callback?username=fixture';f.state.callback.verify=`http://127.0.0.1:9000/verify?payment_hash=${hash}`;f.state.callback.pr=invoice({network:network('tb')});
   const adapter=factory({id:'local-test',url:'http://127.0.0.1:9000/pay',allowLoopbackHttp:true,mode:'test',network:'testnet',fetcher:f.fetcher}),c=context({mode:'test'}),intent=await adapter.create(c);
-  assert.equal(intent.network,'testnet');f.state.verify.settled=true;f.state.verify.preimage=preimage;assert.equal((await adapter.check(c,intent)).status,'paid');
+  assert.equal(intent.network,'testnet');assert.equal(intent.cashuWalletHandoff,undefined);f.state.verify.settled=true;f.state.verify.preimage=preimage;assert.equal((await adapter.check(c,intent)).status,'paid');
 });
 test('LNURL verifies only the exact invoice and its SHA256 preimage, returning stable cross-adapter payment identity',async()=>{
   const f=fixture(),c=context(),intent=await f.adapter.create(c);assert.equal((await f.adapter.check(c,intent)).status,'pending');
@@ -88,6 +89,7 @@ for(const [name,change] of [
 });
 test('LNURL missing verification support remains review even with sender evidence',async()=>{
   const f=fixture();delete f.state.callback.verify;const c=context(),intent=await f.adapter.create(c);
+  assert.equal(intent.cashuWalletHandoff,undefined);
   assert.equal((await f.adapter.check(c,intent,{transactionId:preimage})).status,'review');assert.equal(f.state.calls.length,2);
 });
 test('LNURL intent or context tampering fails before any verification request',async()=>{

@@ -9,6 +9,10 @@ export interface ReceivingContext {
 }
 export interface ReceivingIntent {
   providerId:string;url?:string;request?:string;network?:string;asset?:string;
+  /** Validated mainnet BOLT11 with independent provider verification; guidance only. */
+  cashuWalletHandoff?:true;
+  /** Provider-validated payment request expiry; may precede the outer receiving window. */
+  expiresAt?:string;
   allocationKey?:string;instructions?:{label:string;value:string}[];
   opaque?:Record<string,unknown>;
 }
@@ -35,6 +39,10 @@ export interface ReceivingRecord {
   amount:number;currency:AdapterCurrency;expectedAtomic:string;createdAt:string;expiresAt:string;
   intent?:ReceivingIntent;receipt?:{number:string;mode:'live'|'test';method:MethodId;amount:number;currency:AdapterCurrency;verifiedAt:string};
   creationUncertain?:boolean;reviewReason?:string;
+}
+
+export function receivingRequestExpiry(request:Pick<ReceivingRecord,'expiresAt'|'intent'>){
+  return Math.min(Date.parse(request.expiresAt),Date.parse(request.intent?.expiresAt??request.expiresAt));
 }
 
 /** Intersect provider-wide and payment-method currency constraints before allocation. */

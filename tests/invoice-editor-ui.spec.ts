@@ -219,3 +219,97 @@ test('live connections that cannot serve this currency cannot fall back to simul
  await expect(page.getByText('No configured live payment method matches this invoice. Ask the merchant for another connection or a supported invoice currency.',{exact:true})).toBeVisible();
  await expect(page.getByRole('button',{name:'Continue with live payment',exact:true})).toBeDisabled();
 });
+
+// Fictional validated-adapter result: never use this payload with a wallet.
+const cashuRequest = {...receivingFixture,method:'lightning',intent:{providerId:'fictional-lightning-provider',request:'lightning:lnbc100u1fixtureonly',network:'mainnet',asset:'BTC',cashuWalletHandoff:true}};
+
+test('Cashu wallet guidance copies and scans the original Lightning request without allocating or paying',async({page})=>{
+  const mutations:string[]=[];
+  await page.clock.install({time:new Date('2026-11-05T20:00:00Z')});
+  await page.addInitScript(()=>{Object.defineProperty(navigator,'clipboard',{value:{writeText:async(value:string)=>{document.body.dataset.copiedRequest=value;}}});});
+  page.on('request',request=>{if(request.method()!=='GET')mutations.push(request.url());});
+  await page.route('**/api/receive/fictional-receiving',route=>route.fulfill({json:{request:cashuRequest}}));
+  await page.goto('/tests/fixtures/invoice-editor-ui.html?receive');
+  const button=page.getByRole('button',{name:'Pay from a Cashu wallet',exact:true});
+  await expect(button).toHaveAttribute('aria-expanded','false');
+  await button.focus();await page.keyboard.press('Enter');
+  await expect(button).toHaveAttribute('aria-expanded','true');
+  const qr=page.getByRole('img',{name:'Scan this Lightning invoice in your Cashu wallet',exact:true});
+  await expect(qr).toBeVisible();
+  const QRCode=await import('qrcode');
+  const expected=QRCode.create(cashuRequest.intent.request,{errorCorrectionLevel:'M'}).modules;
+  // Node PNG compression differs from Chromium canvas. Compare the actual
+  // rendered module pixels, including the quiet zone, rather than PNG bytes.
+  const pixels=await qr.evaluate((element,size)=>{
+    const image=element as HTMLImageElement,canvas=document.createElement('canvas');canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;
+    const context=canvas.getContext('2d')!;context.drawImage(image,0,0);const pixels=context.getImageData(0,0,canvas.width,canvas.height).data;
+    const scale=canvas.width/(size+8),modules:number[]=[];
+    for(let row=-4;row<size+4;row++)for(let col=-4;col<size+4;col++){
+      const x=Math.floor((col+4.5)*scale),y=Math.floor((row+4.5)*scale);modules.push(pixels[(y*canvas.width+x)*4]<128?1:0);
+    }return modules;
+  },expected.size);
+  const modules:number[]=[];for(let row=-4;row<expected.size+4;row++)for(let col=-4;col<expected.size+4;col++)modules.push(row<0||col<0||row>=expected.size||col>=expected.size?0:expected.data[row*expected.size+col]);
+  expect(pixels).toEqual(modules);
+  await page.getByRole('button',{name:'Copy Lightning invoice for Cashu wallet',exact:true}).click();
+  await expect(page.locator('body')).toHaveAttribute('data-copied-request',cashuRequest.intent.request);
+  await expect(page.getByText('Your receipt will say Lightning.',{exact:true})).toBeVisible();
+  expect(mutations).toEqual([]);
+  await page.setViewportSize({width:390,height:844});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
+  await page.clock.fastForward(61000);
+  await expect(button).toHaveCount(0);await expect(qr).toHaveCount(0);
+});
+
+for(const [label,change] of Object.entries({
+  'test request':{mode:'test'},'on-chain request':{method:'bitcoin'},'pending creation':{status:'creation_pending'},
+  'owner review':{reviewReason:'Independent review needed'},'uncertain creation':{creationUncertain:true},
+  'manual receiver':{intent:{...cashuRequest.intent,cashuWalletHandoff:undefined}},
+  'test network':{intent:{...cashuRequest.intent,network:'testnet'}},
+  'invalid request':{intent:{...cashuRequest.intent,request:'lightning:lnurl1fictional'}},
+  'zero amount':{expectedAtomic:'0'},
+}))test(`Cashu wallet guidance is absent for ${label}`,async({page})=>{
+  await page.clock.install({time:new Date('2026-11-05T20:00:00Z')});
+  await page.route('**/api/receive/fictional-receiving',route=>route.fulfill({json:{request:{...cashuRequest,...change}}}));
+  await page.goto('/tests/fixtures/invoice-editor-ui.html?receive');
+  await expect(page.getByRole('heading',{level:1})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Pay from a Cashu wallet',exact:true})).toHaveCount(0);
+});
+
+test('Cashu handoff retires at the actual BOLT11 expiry before the outer request window',async({page})=>{
+  await page.clock.install({time:new Date('2026-11-05T20:00:00Z')});
+  await page.route('**/api/receive/fictional-receiving',route=>route.fulfill({json:{request:{...cashuRequest,intent:{...cashuRequest.intent,expiresAt:'2026-11-05T20:00:10Z'}}}}));
+  await page.goto('/tests/fixtures/invoice-editor-ui.html?receive');
+  const button=page.getByRole('button',{name:'Pay from a Cashu wallet',exact:true});await button.click();
+  await expect(page.getByRole('img',{name:'Scan this Lightning invoice in your Cashu wallet',exact:true})).toBeVisible();
+  await page.clock.fastForward(11000);
+  await expect(page.getByText('Payment request expired',{exact:true})).toBeVisible();await expect(button).toHaveCount(0);
+  await expect(page.locator('.receiving-address')).toHaveCount(0);
+});
+
+test('Cashu guide keeps exact copy available when its Lightning invoice is too large for QR',async({page})=>{
+  const payload='lightning:lnbc'+'a'.repeat(6000);
+  await page.clock.install({time:new Date('2026-11-05T20:00:00Z')});
+  await page.addInitScript(()=>{Object.defineProperty(navigator,'clipboard',{value:{writeText:async(value:string)=>{document.body.dataset.copiedRequest=value;}}});});
+  await page.route('**/api/receive/fictional-receiving',route=>route.fulfill({json:{request:{...cashuRequest,intent:{...cashuRequest.intent,request:payload}}}}));
+  await page.goto('/tests/fixtures/invoice-editor-ui.html?receive');
+  await page.getByRole('button',{name:'Pay from a Cashu wallet',exact:true}).click();
+  await expect(page.getByRole('status')).toHaveText('QR unavailable. Copy the Lightning invoice instead.');
+  await page.getByRole('button',{name:'Copy Lightning invoice for Cashu wallet',exact:true}).click();
+  expect(await page.locator('body').getAttribute('data-copied-request')).toBe(payload);
+});
+
+test('a delayed QR module cannot revive an expired Cashu handoff',async({page})=>{
+  let release!:()=>void,started!:()=>void;
+  const held=new Promise<void>(resolve=>{release=resolve;}),requested=new Promise<void>(resolve=>{started=resolve;});
+  await page.clock.install({time:new Date('2026-11-05T20:00:00Z')});
+  await page.route('**/api/receive/fictional-receiving',route=>route.fulfill({json:{request:{...cashuRequest,intent:{...cashuRequest.intent,expiresAt:'2026-11-05T20:00:10Z'}}}}));
+  await page.route('**/*qrcode*',async route=>{started();await held;await route.continue();});
+  try{
+    await page.goto('/tests/fixtures/invoice-editor-ui.html?receive');
+    await page.getByRole('button',{name:'Pay from a Cashu wallet',exact:true}).click();await requested;
+    await page.clock.fastForward(11000);await expect(page.getByText('Payment request expired',{exact:true})).toBeVisible();
+    const loaded=page.waitForResponse(response=>response.url().includes('qrcode'));release();await loaded;
+    await expect(page.getByRole('button',{name:'Pay from a Cashu wallet',exact:true})).toHaveCount(0);
+    await expect(page.getByRole('img',{name:'Scan this Lightning invoice in your Cashu wallet',exact:true})).toHaveCount(0);
+  }finally{release();}
+});

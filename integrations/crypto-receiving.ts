@@ -205,7 +205,7 @@ function lndAdapter(config:Extract<CryptoAdapterConfig,{kind:'lnd'}>,mode:'live'
           invoice=await get(`/v1/invoice/${hash}`);
         }
         await validateInvoice(invoice,context,destination);
-        return {providerId:hash,request:`lightning:${invoice.payment_request}`,network,asset:'BTC',allocationKey:`lightning:${network}:${destination}:${hash}`,instructions:[{label:'Network',value:network},{label:'Native amount',value:`${context.expectedAtomic} satoshis`}],opaque:{kind:'lnd',binding:binding(context),destination}};
+        return {providerId:hash,request:`lightning:${invoice.payment_request}`,expiresAt:new Date(Number(integer(invoice.creation_date)!+integer(invoice.expiry)!)*1000).toISOString(),network,asset:'BTC',...(mode==='live'&&network==='mainnet'?{cashuWalletHandoff:true as const}:{}),allocationKey:`lightning:${network}:${destination}:${hash}`,instructions:[{label:'Network',value:network},{label:'Native amount',value:`${context.expectedAtomic} satoshis`}],opaque:{kind:'lnd',binding:binding(context),destination}};
       });
     },
     async check(context,intent){

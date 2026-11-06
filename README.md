@@ -57,8 +57,9 @@ its pinned private Hermes worker and native Marmot runtime.
 ## Nut November
 
 See the [November Cashu build plan and current limits](docs/NUT-NOVEMBER.md).
-The entry is work in progress; genuine ecash receiving and redemption are not
-implemented in the registration baseline.
+The entry is work in progress. A [Cashu wallet guide](docs/CASHU-WALLET.md) now
+reuses verified Lightning invoices; receipts stay Lightning. Direct ecash
+receiving and redemption remain unimplemented.
 
 ## Features and boundaries
 

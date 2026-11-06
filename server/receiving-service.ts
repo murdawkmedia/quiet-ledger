@@ -11,7 +11,7 @@ export interface ReceivingQuote {expectedAtomic:string;cadEquivalent:number;sour
 export type QuoteReceiving=(invoice:Invoice,method:MethodId,mode:'live'|'test')=>Promise<ReceivingQuote>;
 interface Stored extends ReceivingRecord {workspace:string;context:ReceivingContext;quote:ReceivingQuote}
 const keyValid=(key:string|undefined)=>Boolean(key&&/^[A-Za-z0-9._:-]{1,128}$/.test(key));
-function safeIntent(intent:ReceivingIntent|undefined){if(!intent)return undefined;const {providerId,url,request,network,asset,instructions}=intent;return {providerId,url,request,network,asset,instructions};}
+function safeIntent(intent:ReceivingIntent|undefined){if(!intent)return undefined;const {providerId,url,request,network,asset,instructions,cashuWalletHandoff,expiresAt}=intent;return {providerId,url,request,network,asset,instructions,...(expiresAt?{expiresAt}:{}),...(cashuWalletHandoff===true?{cashuWalletHandoff:true as const}:{})};}
 export class ReceivingService {
   private active=new Map<string,Promise<Stored>>();private cooldown=new Map<string,number>();
   constructor(private store:Store,readonly adapters:ReceivingAdapter[],private quote:QuoteReceiving,private now:()=>Date,private publicOrigin?:string){

@@ -1,9 +1,11 @@
 import {useEffect,useRef,useState} from 'react';
 import {ArrowUpRight,CheckCircle2,Download,RefreshCw,ShieldCheck,Wallet} from 'lucide-react';
 import type {AdapterCurrency,ReceivingRecord} from '../../shared/receiving';
+import {receivingRequestExpiry} from '../../shared/receiving';
 import type {MethodId} from '../../shared/payment-methods';
 import {api,date,downloadJson,methodLabel,money,post} from '../api';
 import {Badge,Brand,CopyButton,ErrorMessage,Loading,PrivacyNote} from '../components';
+import {canGuideCashuWallet,CashuWalletHandoff} from './CashuWalletHandoff';
 
 export type AdapterView={label?:string;id:string;methods:string[];mode:'live'|'test';configured?:boolean;verified?:boolean;supportedCurrencies?:AdapterCurrency[];supportedCurrenciesByMethod?:Partial<Record<MethodId,AdapterCurrency[]>>};
 export type ReceiveRequest=ReceivingRecord&{receiptToken?:string;nativePayment?:{asset:string;atomicAmount:string;network:string}};
@@ -17,19 +19,21 @@ export function nativeAmount(request:ReceiveRequest){
 }
 export function ReceivingDetails({request}:{request:ReceiveRequest}){
   const url=safePaymentUrl(request.intent?.url);
-  const [expired,setExpired]=useState(()=>Date.parse(request.expiresAt)<=Date.now());
+  const deadline=receivingRequestExpiry(request);
+  const [expired,setExpired]=useState(()=>deadline<=Date.now());
   useEffect(()=>{
     let timer:ReturnType<typeof setTimeout>|undefined;
-    function update(){const remaining=Date.parse(request.expiresAt)-Date.now();setExpired(remaining<=0);if(remaining>0)timer=setTimeout(update,Math.min(remaining,2147483647));}
+    function update(){const remaining=deadline-Date.now();setExpired(remaining<=0);if(remaining>0)timer=setTimeout(update,Math.min(remaining,2147483647));}
     update();return()=>clearTimeout(timer);
-  },[request.expiresAt]);
-  const expiry=new Intl.DateTimeFormat('en-CA',{dateStyle:'medium',timeStyle:'short'}).format(new Date(request.expiresAt));
+  },[deadline]);
+  const expiry=new Intl.DateTimeFormat('en-CA',{dateStyle:'medium',timeStyle:'short'}).format(new Date(deadline));
   return <div className="receiving-details">
     <div className="native-amount"><Wallet size={22}/><strong>{nativeAmount(request)}</strong></div>
     <p className="receive-fiat">Invoice value {money(request.amount,request.currency)} {request.currency}</p>
     <dl className="receive-facts"><div><dt>Method</dt><dd>{methodLabel(request.method)}</dd></div><div><dt>Network</dt><dd>{request.intent?.network??'Provider checkout'}</dd></div>{request.intent?.asset?<div><dt>Asset</dt><dd>{request.intent.asset}</dd></div>:null}<div><dt>Expires</dt><dd>{expiry}</dd></div></dl>
     {expired?<div className="review-message" role="status"><strong>Payment request expired</strong><p>Ask the owner for a fresh request before sending. If you already paid, you can still check its status for review.</p></div>:request.intent?.request?<div className="payment-request receiving-address"><code>{request.intent.request}</code><CopyButton value={request.intent.request} label="Copy payment request"/></div>:null}
     {!expired?request.intent?.instructions?.map((instruction,index)=><div className="receive-instruction" key={index}><strong>{instruction.label}</strong><p>{instruction.value}</p></div>):null}
+    {!expired&&canGuideCashuWallet(request)?<CashuWalletHandoff key={`${request.id}:${request.intent!.request}`} paymentRequest={request.intent!.request!}/>:null}
     {url&&!expired?<a href={url} target="_blank" rel="noreferrer" className="button primary full">Open secure provider checkout<ArrowUpRight size={16}/></a>:null}
   </div>;
 }

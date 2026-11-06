@@ -144,6 +144,7 @@ function lndFixture(){
 test('LND creates/reuses exact invoices, validates node and request, and settles only exact millisatoshis',async()=>{
   const {adapter,state}=lndFixture(),c=context({method:'lightning'}),intent=await adapter.create(c);
   assert.equal(intent.network,'mainnet');assert.equal(intent.asset,'BTC');assert.match(intent.request!,/^lightning:lnbc/);
+  assert.equal(intent.cashuWalletHandoff,true);
   assert.deepEqual(await adapter.create(c),intent);assert.equal(state.calls.filter(x=>x.init?.method==='POST').length,1);
   assert.equal((await adapter.check(c,intent)).status,'pending');state.settled=true;
   const paid=await adapter.check(c,intent);assert.equal(paid.status,'paid');assert.deepEqual(await adapter.check(c,intent),paid);
@@ -180,6 +181,7 @@ test('LND settlement after invoice expiry requires review even inside the outer 
 for(const method of ['usdt','usdc','cashu','ark','lightning','liquid'] as const)test(`${method} manual instructions never turn payer evidence into settlement`,async()=>{
   const adapter=createCryptoAdapter({kind:'manual',id:`manual-${method}`,method,address:method==='usdt'||method==='usdc'?'0x'+'12'.repeat(20):'fixture-receive-destination',network:method==='usdt'||method==='usdc'?'ethereum-mainnet':'mainnet'}),c=context({method});
   const intent=await adapter.create(c);assert(intent.instructions?.length);assert(intent.allocationKey);
+  assert.equal(intent.cashuWalletHandoff,undefined);
   assert.equal((await adapter.check(c,intent,{transactionId:txid})).status,'review');
 });
 test('stablecoin instructions require explicit supported network, EVM destination and 6 decimal atomic amount',async()=>{

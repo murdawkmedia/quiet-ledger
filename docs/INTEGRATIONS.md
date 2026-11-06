@@ -87,7 +87,9 @@ Bull's inspected TypeScript SDK order helper only simulated a quote.
 Bitcoin Well's account terms restrict unapproved automation and third-party
 use. Supported account arrangements and Cashu-origin funding acceptance remain
 unverified. A compatible mint could pay a provider Lightning invoice through
-Cashu redemption, but this bridge is not implemented in the MVP.
+Cashu redemption. The [external-wallet guide](CASHU-WALLET.md) supports paying
+a verified Lightning invoice; it does not integrate provider cash-out or direct
+ecash receiving. Funded wallet/provider acceptance remains unverified.
 
 Tangerine supports downloading bank transactions. No public developer
 execution API was verified; this MVP neither logs into Tangerine nor imports

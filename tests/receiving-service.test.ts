@@ -56,3 +56,28 @@ test('receiving rejects wrong paid binding and does not retry an uncertain non-i
     assert.equal((await user.agent.get('/api/collateral')).status,503);
   }finally{app.locals.close();}
 });
+
+test('public Lightning handoff preserves exact payload and provider-only receipt provenance',async()=>{
+  let paid=false,creates=0;
+  const payload='lightning:lnbc10u1fixtureonly';
+  const adapter:ReceivingAdapter={id:'synthetic-lightning',mode:'live',methods:['lightning'],create:async c=>{
+    creates++;return {providerId:c.requestId,request:payload,expiresAt:new Date(Date.now()+30000).toISOString(),network:'mainnet',asset:'BTC',cashuWalletHandoff:true,opaque:{secret:'synthetic-hidden-marker'}};
+  },check:async c=>paid?{status:'paid',paymentId:'synthetic-lightning-payment',amount:c.amount,currency:c.currency,reference:c.requestId}:{status:'pending'}};
+  const app=createApp({dbPath:':memory:',ownerToken,receivingAdapters:[adapter],receivingQuote:async()=>({expectedAtomic:'1000',cadEquivalent:125,source:'synthetic-only',observedAt:new Date().toISOString()})});
+  try{
+    const user=await owner(app),invoice=(await user.post('/api/invoices',input)).body,key=randomUUID();
+    const created=await user.post('/api/receiving',{invoiceId:invoice.id,method:'lightning',adapterId:adapter.id},key);
+    assert.equal(created.status,201);const record=created.body.request;
+    const path=`/api/receive/${record.token}`;
+    const publicRecord=(await request(app).get(path)).body.request;
+    assert.equal(publicRecord.intent.cashuWalletHandoff,true);assert.equal(publicRecord.intent.request,payload);assert.equal(publicRecord.intent.expiresAt,record.intent.expiresAt);assert(Number.isFinite(Date.parse(publicRecord.intent.expiresAt)));
+    assert(!JSON.stringify(publicRecord).includes('synthetic-hidden-marker'));assert.equal(publicRecord.receipt,undefined);
+    assert.equal((await user.post(`/api/receiving/${record.id}/check`)).body.request.status,'awaiting_payment');
+    assert.equal((await user.post('/api/receiving',{invoiceId:invoice.id,method:'lightning',adapterId:adapter.id},key)).body.request.id,record.id);
+    paid=true;const settled=(await user.post(`/api/receiving/${record.id}/check`)).body.request;
+    assert.equal(settled.receipt.method,'lightning');assert.equal(settled.receipt.mode,'live');
+    assert.deepEqual((await user.post(`/api/receiving/${record.id}/check`)).body.request.receipt,settled.receipt);
+    assert.equal(creates,1);const saved=(await user.agent.get(`/api/invoices/${invoice.id}`)).body;
+    assert.equal(saved.nativePayment.verification,'provider');assert.equal(saved.paymentMethod,'lightning');
+  }finally{app.locals.close();}
+});
