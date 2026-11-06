@@ -4,12 +4,21 @@ Open Quiet Ledger, choose **Hackathon demo**, enter **marmot**, then open the de
 conversation and choose **Start conversation**. No wallet, signer extension,
 White Noise or other app is required. Use fictional information only.
 
-You are the merchant. Riley produces hands-on private-messaging workshops for
-fictional Marmot Field Lab; Jordan keeps its scope and invoice wording clear.
-Riley cares about useful footage and participant consent. Jordan has a dry sense
-of humour and asks who reviews the work. Neither represents Marmot or White Noise.
-They compose short replies using a shared business brief, distinct personas and
-recent messages from the current conversation.
+You are the merchant. Riley and Jordan are fictional people whose replies are
+simulated with AI for the demo. The product's business workflow is for people
+working with their clients and accountants; this demo does not require or promise
+built-in AI staff for ordinary invoice accounts.
+
+Riley produces **Burrow Sessions**, an imagined Marmot workshop at fictional
+Marmot Field Lab. The current project is the **Burrow Kit**: a joining walkthrough,
+welcome card and troubleshooting page. Riley cares about the guest stuck at an
+invite and useful footage made with consent. Jordan keeps deliverables and review
+boundaries clear, with dry office-comedy humour inspired by Office Space. Jordan
+is an original character and does not quote or impersonate the film. Neither
+represents Marmot or White Noise, and the event is not an official gathering.
+Dates, venue, headcount, budget and bookings are deliberately unspecified.
+They compose short replies using the shared fictional brief, distinct personas
+and recent messages from the current conversation.
 
 An optional [Codex subscription backend](CODEX-DEMO.md) runs Jordan on Luna Max,
 with a separate explicit opt-in for Riley to use the same backend. Each keeps its
