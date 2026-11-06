@@ -23,7 +23,7 @@ await writeFile(resolve(output,'public/_headers'),`/*
 `);
 await writeFile(resolve(output,'public/robots.txt'),'User-agent: *\nDisallow: /\n');
 const notices=[];
-for(const [name,file] of [['react','LICENSE'],['react-dom','LICENSE'],['lucide-react','LICENSE'],['@simplewebauthn/browser','LICENSE.md'],['@fontsource/dm-sans','LICENSE'],['@fontsource/lora','LICENSE'],['@internet-privacy/marmot-ts','LICENSE'],['@internet-privacy/marmot-ts','dist/vendor/ts-mls/LICENSE'],['nostr-tools','LICENSE'],['ws','LICENSE'],['@noble/curves','LICENSE'],['@noble/ciphers','LICENSE'],['@noble/hashes','LICENSE']]){
+for(const [name,file] of [['react','LICENSE'],['react-dom','LICENSE'],['lucide-react','LICENSE'],['@simplewebauthn/browser','LICENSE.md'],['@fontsource/dm-sans','LICENSE'],['@fontsource/lora','LICENSE'],['@internet-privacy/marmot-ts','LICENSE'],['@internet-privacy/marmot-ts','dist/vendor/ts-mls/LICENSE'],['nostr-tools','LICENSE'],['ws','LICENSE'],['nodemailer','LICENSE'],['@noble/curves','LICENSE'],['@noble/ciphers','LICENSE'],['@noble/hashes','LICENSE']]){
   notices.push('--- '+name+' ---\n'+await readFile(resolve(root,'node_modules',name,file),'utf8'));
 }
 // Marmot vendors ts-mls and adds its own dependency tree. Include each exact

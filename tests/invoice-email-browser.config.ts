@@ -1,0 +1,4 @@
+import {defineConfig} from '@playwright/test';
+import {resolve} from 'node:path';
+const artifacts=resolve(process.env.QUIET_LEDGER_EMAIL_ARTIFACTS??'.runtime/email-browser');
+export default defineConfig({testDir:'./browser',testMatch:'invoice-email.spec.ts',workers:1,timeout:45000,expect:{timeout:8000},outputDir:resolve(artifacts,'results'),reporter:[['list'],['json',{outputFile:resolve(artifacts,'report.json')}]],use:{baseURL:'http://localhost:4354',browserName:'chromium',headless:true,launchOptions:{executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE??'/usr/bin/chromium'},trace:'retain-on-failure'},webServer:{command:'node --import tsx tests/invoice-email-ui-app.ts',cwd:resolve(import.meta.dirname,'..'),url:'http://localhost:4354/api/health',reuseExistingServer:false,timeout:30000}});

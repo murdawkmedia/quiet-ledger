@@ -1,7 +1,7 @@
 import { defineConfig } from '@playwright/test';
 export default defineConfig({
   testDir: './tests/browser',
-  testIgnore: ['adversarial.spec.ts','hosted-accounts.spec.ts','passkey-manager.spec.ts','saved-connections.spec.ts','marmot-demo.spec.ts','marmot-invoice.spec.ts','demo-team.spec.ts'],
+  testIgnore: ['adversarial.spec.ts','hosted-accounts.spec.ts','passkey-manager.spec.ts','saved-connections.spec.ts','marmot-demo.spec.ts','marmot-invoice.spec.ts','demo-team.spec.ts','invoice-email.spec.ts'],
   timeout: 45_000,
   expect: { timeout: 8_000 },
   fullyParallel: false,

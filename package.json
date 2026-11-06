@@ -12,7 +12,7 @@
     "typecheck": "tsc --noEmit",
     "build": "npm run typecheck && vite build",
     "test": "tsx --test tests/*.test.ts",
-    "test:e2e": "playwright test && playwright test --config tests/hardening-browser.config.ts && npm run test:e2e:accounts && npm run test:e2e:passkeys && npm run test:e2e:connections && npm run test:e2e:saved-connections && npm run test:e2e:marmot",
+    "test:e2e": "playwright test && playwright test --config tests/hardening-browser.config.ts && npm run test:e2e:accounts && npm run test:e2e:passkeys && npm run test:e2e:connections && npm run test:e2e:saved-connections && npm run test:e2e:marmot && npm run test:e2e:email",
     "test:e2e:core": "playwright test",
     "test:e2e:adversarial": "playwright test --config tests/hardening-browser.config.ts",
     "mcp": "node --import tsx server/mcp.ts",
@@ -21,7 +21,8 @@
     "test:e2e:passkeys": "playwright test --config tests/passkey-manager-browser.config.ts",
     "test:e2e:connections": "playwright test --config tests/connections-ui.config.ts",
     "test:e2e:saved-connections": "playwright test --config tests/saved-connections-browser.config.ts",
-    "test:e2e:marmot": "playwright test --config tests/conversations-ui.config.ts && playwright test --config tests/marmot-demo-browser.config.ts"
+    "test:e2e:marmot": "playwright test --config tests/conversations-ui.config.ts && playwright test --config tests/marmot-demo-browser.config.ts",
+    "test:e2e:email": "playwright test --config tests/invoice-email-browser.config.ts"
   },
   "dependencies": {
     "@fontsource/dm-sans": "5.3.0",
@@ -33,6 +34,7 @@
     "bolt11": "1.4.2",
     "express": "5.3.0",
     "lucide-react": "1.68.0",
+    "nodemailer": "10.3.1",
     "nostr-tools": "2.25.5",
     "qrcode": "1.5.4",
     "react": "19.3.1",

@@ -13,6 +13,11 @@ the team is active, use **Demo invoices** to reopen earlier checkouts, and click
 the current invoice card to view its checkout and receipt. Agent chats have a
 separate ten-minute allowance; resetting them keeps invoices.
 
+Invoice email supports saved and custom recipients, optional CC to yourself,
+Gmail App Password setup and mail-app drafts. The demo previews messages only.
+See [invoice email](docs/INVOICE-EMAIL.md) for connection steps, retry behavior
+and privacy limits. Optional Marmot/White Noise self-copies remain planned.
+
 ## Source and mirrors
 
 Development is maintained through ngit and GitWorkshop. This GitHub repository

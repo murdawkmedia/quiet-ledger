@@ -189,17 +189,17 @@ export class HackathonDemo {
       if (session.role === 'demo' && session.hackathonDemo === true && owned.get(session.workspace) === session.accountId && Date.parse(session.expires) <= Date.parse(now)) this.store.db.prepare('DELETE FROM sessions WHERE token_hash=?').run(String(row.token_hash));
     }
     // Known dependent tables only. Never sweep arbitrary tables or real account records.
-    const optional = new Set(this.store.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('marmot_events','marmot_conversations','receiving_requests','payment_reports','square_test_checkouts','account_connections','account_api_keys','demo_agent_turns','demo_agent_events','demo_agent_leases','invoice_templates')").all().map(row => String(row.name)));
+    const optional = new Set(this.store.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('marmot_events','marmot_conversations','receiving_requests','payment_reports','square_test_checkouts','account_connections','account_api_keys','demo_agent_turns','demo_agent_events','demo_agent_leases','invoice_templates','invoice_email_settings','invoice_email_credentials','invoice_email_deliveries')").all().map(row => String(row.name)));
     for (const data of expired) {
       const workspace = data.workspace;
-      for (const name of ['invoice_templates','demo_agent_turns','demo_agent_events','demo_agent_leases','marmot_events', 'marmot_conversations', 'receiving_requests', 'payment_reports', 'account_connections', 'account_api_keys']) if (optional.has(name)) this.store.db.prepare(`DELETE FROM ${name} WHERE workspace=?`).run(workspace);
+      for (const name of ['invoice_email_deliveries','invoice_email_credentials','invoice_email_settings','invoice_templates','demo_agent_turns','demo_agent_events','demo_agent_leases','marmot_events', 'marmot_conversations', 'receiving_requests', 'payment_reports', 'account_connections', 'account_api_keys']) if (optional.has(name)) this.store.db.prepare(`DELETE FROM ${name} WHERE workspace=?`).run(workspace);
       if (optional.has('square_test_checkouts')) this.store.db.prepare('DELETE FROM square_test_checkouts WHERE invoice_id IN (SELECT id FROM invoices WHERE workspace=?)').run(workspace);
       this.store.db.prepare('DELETE FROM receipts WHERE invoice_id IN (SELECT id FROM invoices WHERE workspace=?)').run(workspace);
       this.store.db.prepare('DELETE FROM revoked_invoice_links WHERE workspace=?').run(workspace);
       this.store.db.prepare('DELETE FROM payouts WHERE workspace=?').run(workspace);
       this.store.db.prepare('DELETE FROM invoices WHERE workspace=?').run(workspace);
       this.store.db.prepare('DELETE FROM audits WHERE workspace=?').run(workspace);
-      for (const prefix of ['demo-invoice','invoice-template','invoice', 'sample', 'quote', 'approve', 'advance', 'connections', 'receiving', 'receiving-confirm', 'report-confirm', 'revoke-links']) this.store.db.prepare('DELETE FROM idempotency WHERE scope=?').run(prefix + ':' + workspace);
+      for (const prefix of ['invoice-email','demo-invoice','invoice-template','invoice', 'sample', 'quote', 'approve', 'advance', 'connections', 'receiving', 'receiving-confirm', 'report-confirm', 'revoke-links']) this.store.db.prepare('DELETE FROM idempotency WHERE scope=?').run(prefix + ':' + workspace);
       this.store.db.prepare(`DELETE FROM ${table} WHERE id=? AND account_id=? AND expires_at<=?`).run(workspace, data.accountId, now);
     }
   }

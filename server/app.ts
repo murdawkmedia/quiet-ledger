@@ -10,6 +10,7 @@ import { Store, DomainError, hash, type StoredSession } from './store.js';
 import { createInvoice, createQuote, approvePayout, advancePayout, settleInvoice, publicInvoice, seedDemo, parse, token } from './domain.js';
 import { SquareSandbox,type SquareSandboxOptions } from './square-sandbox.js';
 import {InvoiceTemplates} from './invoice-templates.js';
+import {InvoiceDelivery,type InvoiceDeliveryOptions} from './invoice-delivery.js';
 import {invoiceAllowsMethod,invoiceRequiresManualReport} from '../shared/invoice-options.js';
 import {PaymentReports} from './payment-reports.js';
 import {METHOD_DEFINITIONS,PAYMENT_METHOD_IDS,methodInfo,receivedValue,canFundPayout} from '../shared/payment-methods.js';
@@ -32,6 +33,7 @@ import type {Invoice,Receipt} from '../shared/contracts.js';
 
 export interface AppOptions {
   dbPath: string;
+  invoiceEmail?:InvoiceDeliveryOptions;
   demoTeam?:Omit<DemoTeamOptions,'store'|'now'|'getSession'|'getDemoCase'|'publicOrigin'>;
   ownerToken?: string;
   encryptionKey?:Buffer;
@@ -107,6 +109,7 @@ export function createApp(options: AppOptions) {
   const squareSandbox=new SquareSandbox(store,options.squareSandbox,now);
   const paymentReports=new PaymentReports(store);
   const invoiceTemplates=new InvoiceTemplates(store);
+  const invoiceEmail=new InvoiceDelivery(store,{...options.invoiceEmail,publicOrigin:hosted?.publicOrigin??options.invoiceEmail?.publicOrigin??'http://localhost:4317',allowInsecureLoopback:hosted?.allowInsecureLoopback??options.invoiceEmail?.allowInsecureLoopback??!hosted,now});
   const receiving=new ReceivingService(store,hosted?[manualReceiving]:options.receivingAdapters??[],options.receivingQuote??quoteReceiving,now);
   const demoReceiving=hosted?new ReceivingService(store,[],options.receivingQuote??quoteReceiving,now):undefined;
   const accountConnections=hosted?createAccountConnections({store,publicOrigin:hosted.publicOrigin,now,getSession:(_req,res)=>res.locals.session,fetcher:options.connectionFetcher,allowInsecureLoopback:hosted.allowInsecureLoopback}):undefined;
@@ -222,7 +225,7 @@ export function createApp(options: AppOptions) {
     if(/^\/(?:account|receiving|collateral|ark)(?:\/|$)/i.test(req.path)||(/^\/auth(?:\/|$)/i.test(req.path)&&!(req.method==='GET'&&req.path==='/auth/config')))return next(new DomainError(403,'Use a private account for account settings and provider connections.'));
     if(['GET','HEAD','OPTIONS'].includes(req.method))return next();
     const conversation=/^\/(?:invoices|checkout)\/[A-Za-z0-9_-]{1,128}\/conversation(?:\/(?:events|query))?$/.test(req.path);
-    if((req.method==='DELETE'&&(req.path==='/session'||/^\/invoice-templates\/[0-9a-f-]{36}$/.test(req.path)))||(req.method==='POST'&&(conversation||req.path==='/invoice-templates'||req.path==='/hackathon-demo/invoices'||req.path==='/hackathon-demo/simulate-payment'||/^\/hackathon-demo\/agents(?:\/(?:connect|pause|resume|reset|invite))?$/.test(req.path))))return next();
+    if((req.method==='DELETE'&&(req.path==='/session'||/^\/invoice-templates\/[0-9a-f-]{36}$/.test(req.path)))||(req.method==='POST'&&(conversation||req.path==='/invoice-templates'||req.path==='/invoice-email/settings'||/^\/invoices\/[0-9a-f-]{36}\/email$/.test(req.path)||req.path==='/hackathon-demo/invoices'||req.path==='/hackathon-demo/simulate-payment'||/^\/hackathon-demo\/agents(?:\/(?:connect|pause|resume|reset|invite))?$/.test(req.path))))return next();
     return next(new DomainError(403,'This fictional demo supports only its tour, conversation and simulated payment actions.'));
   });
   if(hosted)app.use(createMarmotConversationsRouter({store,now,publicOrigin:hosted.publicOrigin,getSession:(_req,res)=>res.locals.session,assertPublicWorkspace,isDemoWorkspace:isHackathonWorkspace}));
@@ -332,6 +335,12 @@ export function createApp(options: AppOptions) {
   app.get('/api/invoice-templates',(_req,res)=>{if(res.locals.apiAccess)throw new DomainError(403,'Use a browser session for invoice templates.');res.json({templates:invoiceTemplates.list((res.locals.session as StoredSession).workspace)});});
   app.post('/api/invoice-templates',(req,res)=>{if(res.locals.apiAccess)throw new DomainError(403,'Use a browser session for invoice templates.');res.status(201).json({template:invoiceTemplates.save((res.locals.session as StoredSession).workspace,req.body)});});
   app.delete('/api/invoice-templates/:id',(req,res)=>{if(res.locals.apiAccess)throw new DomainError(403,'Use a browser session for invoice templates.');res.json(invoiceTemplates.remove((res.locals.session as StoredSession).workspace,param(req,'id')));});
+  const emailAccess=(res:Response)=>{if(res.locals.apiAccess)throw new DomainError(403,'Use a browser session for invoice emails.');const session=res.locals.session as StoredSession;return{workspace:session.workspace,context:{demo:session.role!=='owner'}};};
+  app.get('/api/invoice-email/settings',(_req,res)=>{const {workspace}=emailAccess(res);res.json({settings:invoiceEmail.settings(workspace)});});
+  app.post('/api/invoice-email/settings',(req,res)=>{const {workspace,context}=emailAccess(res);res.json({settings:invoiceEmail.saveSettings(workspace,req.body,context)});});
+  app.post('/api/invoice-email/verify',async(req,res)=>{parse(z.object({}).strict(),req.body??{});const {workspace,context}=emailAccess(res);res.json({settings:await invoiceEmail.verifyGmail(workspace,context)});});
+  app.get('/api/invoices/:id/email',(req,res)=>{const {workspace,context}=emailAccess(res);res.json(invoiceEmail.view(workspace,param(req,'id'),context));});
+  app.post('/api/invoices/:id/email',async(req,res)=>{const {workspace,context}=emailAccess(res),id=param(req,'id'),key=idempotencyKey(req);sendResult(res,req.body?.action==='send'?await invoiceEmail.send(workspace,id,req.body,key,context):invoiceEmail.compose(workspace,id,req.body,key,context));});
   if(demoTeam)app.use(demoTeam.router);
   if(accountKeys)app.use(accountKeys.router);
   if(accountConnections)app.use(accountConnections.router);
