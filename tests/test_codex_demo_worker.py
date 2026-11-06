@@ -121,7 +121,7 @@ class CodexWorkerContract(unittest.TestCase):
         executable.chmod(0o700)
         return module, state, native_home, report, executable
 
-    def invoke(self, mode='success', deadline=2):
+    def invoke(self, mode='success', deadline=2, role='accountant'):
         with tempfile.TemporaryDirectory(prefix='ql-codex-test-') as folder:
             root=Path(folder);module,state,native_home,report,executable=self.fixture(root,mode,deadline)
             before=(native_home/'.codex/auth.json').stat()
@@ -130,12 +130,12 @@ class CodexWorkerContract(unittest.TestCase):
                  'QUIET_LEDGER_WORKER_TOKEN_FILE':'/not-a-model-credential'}
             with patch.dict(os.environ,env):
                 inference=module.CodexInference(state_dir=str(state),codex=str(executable),deadline=deadline)
-                try: value=inference(payload('accountant'))
+                try: value=inference(payload(role))
                 except module.ServiceError as error: value=error
             after=(native_home/'.codex/auth.json').stat()
             self.assertEqual((before.st_mtime_ns,before.st_size),(after.st_mtime_ns,after.st_size))
             self.assertEqual(list(state.iterdir()),[])
-            return module,value,json.loads(report.read_text())
+            return module,value,json.loads(report.read_text()) if report.exists() else {}
 
     def test_exact_subscription_model_and_same_fictional_context_without_tools(self):
         module,value,report=self.invoke()
@@ -159,6 +159,16 @@ class CodexWorkerContract(unittest.TestCase):
         serialized=json.dumps(report)
         for forbidden in ['fictional-api-sentinel','fictional-mcp-sentinel','fictional-auth-sentinel','/do-not-use-this-profile']:
             self.assertNotIn(forbidden,serialized)
+
+    def test_client_uses_its_own_persona_in_a_fresh_restricted_native_turn(self):
+        module,value,report=self.invoke(role='client')
+        self.assertIsInstance(value,dict)
+        seen={row['method']:row.get('params') for row in report['seen'] if 'method' in row}
+        self.assertEqual(seen['thread/start']['baseInstructions'],module.demo_prompt(payload('client'))[0])
+        self.assertEqual(seen['turn/start']['input'],[{'type':'text','text':module.demo_prompt(payload('client'))[1]}])
+        self.assertIn('client-',Path(report['cwd']).name)
+        self.assertEqual(seen['thread/start']['dynamicTools'],[])
+        self.assertEqual(seen['thread/start']['sandbox'],'read-only')
 
     def test_effective_mcp_config_and_tools_are_checked_before_model_turn(self):
         for mode in ['mcp_enabled','mcp_tools','mcp_page','shell_enabled','image_enabled',
@@ -219,7 +229,7 @@ class CodexWorkerContract(unittest.TestCase):
             root=Path(folder);module,state,native_home,report,executable=self.fixture(root)
             with patch.dict(os.environ,{'HOME':str(native_home)}):
                 inference=module.CodexInference(state_dir=str(state),codex=str(executable))
-                for request in [payload('client'),dict(payload('accountant'),extra='private')]:
+                for request in [dict(payload('accountant'),role='owner'),dict(payload('accountant'),extra='private')]:
                     with self.assertRaises(module.ServiceError) as caught:inference(request)
                     self.assertEqual(caught.exception.status,400)
             self.assertFalse(report.exists());self.assertEqual(list(state.iterdir()),[])
@@ -229,7 +239,7 @@ class CodexWorkerContract(unittest.TestCase):
         self.assertTrue(hasattr(module,'CodexService'),'Codex health contract is missing')
         service=module.CodexService(token='t'*43,infer=lambda request:self.fail('health called the model'))
         self.assertEqual(service.health(),{'runtime':'codex','model':'gpt-6-luna','reasoningEffort':'max',
-                                         'ready':True,'mode':'fictional-conversation-only'})
+                                         'ready':True,'mode':'fictional-conversation-only','roles':['client','accountant']})
 
     def test_binary_override_requires_an_absolute_existing_executable(self):
         with tempfile.TemporaryDirectory(prefix='ql-codex-binary-') as folder:

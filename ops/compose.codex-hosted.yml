@@ -1,9 +1,11 @@
-# Optional accountant-only Codex subscription service through a private socket.
+# Optional Codex subscription service through a private socket.
 # Establish and verify this socket before enabling the override. No public port.
+# Client routing remains Hermes unless the installer explicitly enables Codex.
 services:
   app:
     environment:
       DEMO_ACCOUNTANT_RUNTIME: codex
+      DEMO_CLIENT_RUNTIME: ${DEMO_CLIENT_RUNTIME:-hermes}
       CODEX_DEMO_SOCKET_FILE: /run/quiet-ledger-codex/codex.sock
       CODEX_DEMO_TOKEN_FILE: /run/secrets/hermes-worker-token
     volumes:

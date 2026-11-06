@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Loopback-only fictional Jordan inference using an existing Codex ChatGPT login.
+"""Loopback-only fictional demo inference using an existing Codex ChatGPT login.
 
 The native app-server owns authentication. This wrapper never reads, copies or
 supplies auth tokens, API keys, personal profiles or conversation databases.
@@ -277,8 +277,6 @@ class CodexInference:
 
     def __call__(self, value):
         request = validate_request(value)
-        if request['role'] != 'accountant':
-            raise ServiceError(400, 'unsupported Codex demo role')
         try:
             config, names = _configuration()
             command = [self.codex, 'app-server', '--listen', 'stdio://']
@@ -286,7 +284,7 @@ class CodexInference:
                 command.extend(['-c', key + '=' + value])
             allowed = ('PATH', 'HOME', 'LANG', 'LC_ALL', 'SSL_CERT_FILE', 'SSL_CERT_DIR')
             env = {key: os.environ[key] for key in allowed if key in os.environ}
-            with tempfile.TemporaryDirectory(prefix='accountant-', dir=self.state_dir) as cwd:
+            with tempfile.TemporaryDirectory(prefix=request['role']+'-', dir=self.state_dir) as cwd:
                 deadline = time.monotonic() + self.deadline
                 process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                            stderr=subprocess.DEVNULL, cwd=cwd, env=env,
@@ -354,7 +352,7 @@ class CodexService(InferenceService):
         super().__init__(token=token, model=MODEL, infer=infer, runtime='codex')
 
     def health(self):
-        return {**super().health(), 'reasoningEffort': EFFORT}
+        return {**super().health(), 'reasoningEffort': EFFORT, 'roles': ['client', 'accountant']}
 
 
 def main():

@@ -6,8 +6,10 @@ the public 0.22.5 source commit
 the explicitly fictional Marmot Field Lab, using a shared company brief and
 distinct personas. Quiet Ledger renders money and recorded status from the
 latest trusted case. Model prose cannot change financial records.
-Jordan can instead use the separate Codex subscription worker below; Riley's
-Hermes runtime and configuration remain independent.
+Jordan can instead use the separate Codex subscription worker. Riley can also
+explicitly use it with `DEMO_CLIENT_RUNTIME=codex`; the default client remains
+Hermes. See [Codex setup](../../docs/CODEX-DEMO.md). This does not copy an OpenAI
+credential to the app or add a paid API fallback.
 
 This service is inference only. The separate native MDK controller owns the two
 Marmot identities, MLS messages, role admission, room leases and reply publishing.

@@ -1,4 +1,18 @@
 import {test,expect} from '@playwright/test';
+for(const viewport of [{width:1440,height:900},{width:390,height:844}]){
+ test(`invoice email checkboxes stay compact with readable labels at ${viewport.width}px`,async({page})=>{
+  await page.setViewportSize(viewport);
+  const {invoiceId}=await page.request.post('/fixture/owner').then(response=>response.json());
+  await page.goto('/invoices/'+invoiceId+'/email');
+  await expect(page.getByRole('heading',{name:'Email your invoice.',exact:true})).toBeVisible();
+  const rows=page.locator('.invoice-email-checkbox');await expect(rows).toHaveCount(2);
+  const boxes=await rows.evaluateAll(labels=>labels.map(label=>{const input=label.querySelector('input')!;return{inputWidth:input.getBoundingClientRect().width,inputHeight:input.getBoundingClientRect().height,labelHeight:label.getBoundingClientRect().height};}));
+  console.log(JSON.stringify({viewport:viewport.width,checkboxes:boxes}));
+  for(const box of boxes){expect(box.inputWidth).toBeGreaterThanOrEqual(14);expect(box.inputWidth).toBeLessThanOrEqual(24);expect(box.inputHeight).toBeLessThanOrEqual(24);expect(box.labelHeight).toBeLessThan(100);}
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  expect((await page.getByLabel('Invoice email recipients',{exact:true}).boundingBox())!.width).toBeGreaterThan(150);
+ });
+}
 test('a private owner saves recipients and Gmail, previews a copy and submits once through the mock transport',async({page})=>{
  const login=await page.request.post('/fixture/owner');const {invoiceId}=await login.json();await page.goto('/invoices/'+invoiceId+'/email');
  await expect(page.getByLabel('Invoice email recipients',{exact:true})).toHaveValue('client@example.test');await page.getByLabel('My invoice copy address',{exact:true}).fill('merchant@example.test');

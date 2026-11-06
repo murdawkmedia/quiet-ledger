@@ -1,8 +1,9 @@
-# Jordan through a Codex subscription
+# Demo agents through a Codex subscription
 
 The optional accountant backend uses the native Codex app server with the
 operator's existing ChatGPT sign-in. Jordan runs `gpt-6-luna` with reasoning
-effort `max`. Riley continues using the existing Hermes backend. This is an
+effort `max`. Riley defaults to the existing Hermes backend and can explicitly
+use the same Codex worker. This is an
 explicit fictional-demo option; ordinary invoice accounts do not gain an AI
 connection. It uses the signed-in plan's usage limits, with no API-key fallback.
 
@@ -33,8 +34,8 @@ path. Then run:
 python3 -I -B agents/demo/codex_worker.py --host 127.0.0.1 --port 4441
 ```
 
-The loopback-only health endpoint reports configuration readiness and the fixed
-model/effort; it does not verify quota or generate a response. Each admitted turn
+The loopback-only health endpoint reports configuration readiness, supported
+roles and the fixed model/effort; it does not verify quota or generate a response. Each admitted turn
 uses a fresh ephemeral thread, the shared fictional brief/persona and bounded
 history from its current room. No tools, MCP, apps, plugins, hooks, browser,
 image access, saved memory or workspace instructions are enabled. Native
@@ -44,13 +45,19 @@ a hard deadline and bounded output; only a validated final reply is returned.
 
 ## Connect the app
 
-Keep the usual fictional-team/Hermes configuration for Riley. Add:
+For Jordan only, keep the usual fictional-team/Hermes configuration for Riley. Add:
 
 ```text
 DEMO_ACCOUNTANT_RUNTIME=codex
 CODEX_DEMO_URL=http://127.0.0.1:4441
 CODEX_DEMO_TOKEN_FILE=/outside/source/private-service-token
 ```
+
+To use the Codex subscription for both fictional agents, additionally set
+`DEMO_CLIENT_RUNTIME=codex`. This is an opt-in; accountant-only installations
+keep Riley on Hermes. Each role still has its own persona, Nostr identity and
+same-room context. The worker must report both `client` and `accountant` in its
+health `roles` before the client option is enabled.
 
 For a separate hosted app, use `CODEX_DEMO_SOCKET_FILE` instead of
 `CODEX_DEMO_URL`. Only one may be configured. The socket must be an owned Unix
@@ -61,13 +68,16 @@ An existing SSH connection can forward a private server-side Unix socket to the
 worker's loopback listener. Provision the private directory and verify the
 connection before enabling `ops/compose.codex-hosted.yml`. The SHC installer
 requires `--enable-codex-accountant` together with both demo flags and checks the
-reachable model/effort first. Later deployments must explicitly retain this
-configured option; omission cannot silently switch Jordan back to another model.
+reachable model/effort first. To enable both roles, also pass
+`--enable-codex-client`; it requires the accountant flag and dual-role worker
+readiness. Later deployments must explicitly retain each configured Codex option;
+omission cannot silently switch either character back to another model. The
+Compose override defaults client routing to Hermes when no client choice exists.
 
 If the worker runs on a laptop, that laptop and SSH connection must stay online.
 An unavailable worker is a visible failed turn. It does not silently fall back
 to another model or paid API. The user interface identifies the configured
-Codex accountant separately from Hermes.
+Codex roles separately from Hermes.
 
 Financial amounts and recorded payment status still come from the latest
 verified ledger case. Model text cannot settle an invoice or change a record.

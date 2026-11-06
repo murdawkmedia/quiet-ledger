@@ -22,7 +22,7 @@ test('Codex is explicit and requires a private local endpoint and owned token',(
  const f=fixture();try{
   assert.equal(loadCodexDemoRuntime({}),undefined);
   assert.throws(()=>loadCodexDemoRuntime({CODEX_DEMO_URL:'http://127.0.0.1:4441'}));
-  for(const extra of [{DEMO_ACCOUNTANT_RUNTIME:'other'}, {HOSTED_ACCOUNTS:'false'}, {CODEX_DEMO_URL:'http://example.org'}, {CODEX_DEMO_URL:'https://example.org'}, {CODEX_DEMO_URL:'http://user@127.0.0.1'}, {CODEX_DEMO_URL:'http://127.0.0.1/path'}, {CODEX_DEMO_URL:'http://127.0.0.1',CODEX_DEMO_SOCKET_FILE:join(f.root,'socket')}])assert.throws(()=>loadCodexDemoRuntime({...f.env,...extra}));
+  for(const extra of [{DEMO_ACCOUNTANT_RUNTIME:'other'}, {DEMO_CLIENT_RUNTIME:'other'}, {HOSTED_ACCOUNTS:'false'}, {CODEX_DEMO_URL:'http://example.org'}, {CODEX_DEMO_URL:'https://example.org'}, {CODEX_DEMO_URL:'http://user@127.0.0.1'}, {CODEX_DEMO_URL:'http://127.0.0.1/path'}, {CODEX_DEMO_URL:'http://127.0.0.1',CODEX_DEMO_SOCKET_FILE:join(f.root,'socket')}])assert.throws(()=>loadCodexDemoRuntime({...f.env,...extra}));
   symlinkSync(f.token,join(f.root,'linked'));assert.throws(()=>loadCodexDemoRuntime({...f.env,CODEX_DEMO_URL:'http://127.0.0.1:4441',CODEX_DEMO_TOKEN_FILE:join(f.root,'linked')}));
   chmodSync(f.token,0o644);assert.throws(()=>loadCodexDemoRuntime({...f.env,CODEX_DEMO_URL:'http://127.0.0.1:4441'}));
  }finally{rmSync(f.root,{recursive:true,force:true});}
@@ -57,5 +57,18 @@ test('only Jordan uses Codex and a Codex failure never falls back to Riley’s p
   assert.equal(runtime.providers?.accountant.model,'gpt-6-luna');assert.equal(runtime.providers?.accountant.reasoningEffort,'max');
   const signal=new AbortController().signal;assert.equal((await runtime.infer('accountant','Hello',context,'jordan',signal)).runtime,'codex');assert.equal((await runtime.infer('client','Hello',context,'riley',signal)).runtime,'hermes');
   codexStatus=503;await assert.rejects(runtime.infer('accountant','Hello',context,'failed',signal));assert.deepEqual(seen,['codex:accountant','hermes:client','codex:accountant']);
+ }finally{for(const server of [codex,hermes]){server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}rmSync(f.root,{recursive:true,force:true});}
+});
+
+test('explicit client opt-in routes both personas to Codex without sending any turn to Hermes',async()=>{
+ const f=fixture();const seen:string[]=[];let codexStatus=200;
+ function service(kind:'codex'|'hermes'){return createServer((req,res)=>{let raw='';req.on('data',chunk=>raw+=chunk);req.on('end',()=>{const input=JSON.parse(raw);seen.push(kind+':'+input.role);res.statusCode=kind==='codex'?codexStatus:200;res.setHeader('Content-Type','application/json');res.end(JSON.stringify({...valid,runtime:kind,model:kind==='codex'?'gpt-6-luna':'fixture'}));});});}
+ const codex=service('codex'),hermes=service('hermes');await new Promise<void>(resolve=>codex.listen(0,'127.0.0.1',resolve));await new Promise<void>(resolve=>hermes.listen(0,'127.0.0.1',resolve));
+ try{
+  const port=(server:ReturnType<typeof createServer>)=>(server.address() as {port:number}).port;
+  const runtime=loadDemoAgentRuntime({...f.env,DEMO_CLIENT_RUNTIME:'codex',CODEX_DEMO_URL:`http://127.0.0.1:${port(codex)}`,HERMES_DEMO_URL:`http://127.0.0.1:${port(hermes)}`,HERMES_DEMO_TOKEN_FILE:f.token,DEMO_TEAM_STATE_DIR:join(f.root,'native'),MARMOT_AGENT_BINARY:join(f.root,'binary'),PUBLIC_ORIGIN:'http://localhost:4417',SELF_HOSTED:'true'})!;
+  for(const role of ['client','accountant'] as const){assert.equal(runtime.providers?.[role]?.runtime,'codex');assert.equal(runtime.providers?.[role]?.model,'gpt-6-luna');assert.equal((await runtime.infer(role,'Which work needs review?',context,role,new AbortController().signal)).runtime,'codex');}
+  codexStatus=503;await assert.rejects(runtime.infer('client','Hello',context,'failed',new AbortController().signal));
+  assert.deepEqual(seen,['codex:client','codex:accountant','codex:client']);
  }finally{for(const server of [codex,hermes]){server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}rmSync(f.root,{recursive:true,force:true});}
 });

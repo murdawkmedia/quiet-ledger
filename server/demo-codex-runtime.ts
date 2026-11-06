@@ -8,10 +8,11 @@ import {readDemoWorkerToken} from './demo-worker-auth.js';
 const model='gpt-6-luna';
 const failure='The Codex subscription demo service is unavailable. No other provider was used.';
 
-/** Optional accountant-only subscription backend. Its sign-in stays on its host. */
+/** Optional explicitly selected demo roles. Its sign-in stays on its host. */
 export function loadCodexDemoRuntime(env:NodeJS.ProcessEnv) {
  const socketPath=env.CODEX_DEMO_SOCKET_FILE,url=env.CODEX_DEMO_URL,tokenPath=env.CODEX_DEMO_TOKEN_FILE;
- if(!env.DEMO_ACCOUNTANT_RUNTIME&&!socketPath&&!url&&!tokenPath)return undefined;
+ if(env.DEMO_CLIENT_RUNTIME&&!['hermes','codex'].includes(env.DEMO_CLIENT_RUNTIME))throw new Error('Invalid client demo runtime.');
+ if(!env.DEMO_ACCOUNTANT_RUNTIME&&env.DEMO_CLIENT_RUNTIME!=='codex'&&!socketPath&&!url&&!tokenPath)return undefined;
  if(env.DEMO_ACCOUNTANT_RUNTIME!=='codex'||env.DEMO_TEAM_ENABLED!=='true'||env.HACKATHON_DEMO_ENABLED!=='true'||env.HOSTED_ACCOUNTS!=='true')throw new Error('Codex requires explicit fictional account demo mode.');
  if(Boolean(socketPath)===Boolean(url)||!tokenPath)throw new Error('Choose one private Codex socket or loopback endpoint and a service token.');
  const token=readDemoWorkerToken(tokenPath);
@@ -24,8 +25,9 @@ export function loadCodexDemoRuntime(env:NodeJS.ProcessEnv) {
   endpoint=new URL(url!);
   if(endpoint.protocol!=='http:'||!['127.0.0.1','[::1]'].includes(endpoint.hostname)||endpoint.username||endpoint.password||endpoint.pathname!=='/'||endpoint.search||endpoint.hash)throw new Error('Codex HTTP must use an explicit literal loopback origin.');
  }
- return {model,reasoningEffort:'max' as const,async infer(role:DemoRole,text:string,caseDTO:DemoCase,requestId:string,signal:AbortSignal,history?:DemoConversationMessage[]):Promise<DemoInference> {
-  if(role!=='accountant')throw new Error('The Codex demo backend is only configured for Jordan.');
+ const roles:readonly DemoRole[]=env.DEMO_CLIENT_RUNTIME==='codex'?['client','accountant']:['accountant'];
+ return {model,roles,reasoningEffort:'max' as const,async infer(role:DemoRole,text:string,caseDTO:DemoCase,requestId:string,signal:AbortSignal,history?:DemoConversationMessage[]):Promise<DemoInference> {
+  if(!roles.includes(role))throw new Error('The Codex demo backend is not configured for this role.');
   const body=JSON.stringify({role,text,case:caseDTO,requestId,...(history?{history}:{})});
   if(Buffer.byteLength(body)>16384)throw new Error('The Codex request exceeds its limit.');
   const inference=await new Promise<DemoInference>((resolve,reject)=>{

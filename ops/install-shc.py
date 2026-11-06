@@ -21,6 +21,7 @@ def argument_parser():
     parser.add_argument('--enable-hackathon-demo',action='store_true')
     parser.add_argument('--enable-demo-team',action='store_true')
     parser.add_argument('--enable-codex-accountant',action='store_true')
+    parser.add_argument('--enable-codex-client',action='store_true')
     parser.add_argument('--base-revision',choices=[APP_BASE_REVISION])
     parser.add_argument('--build-reserve-mib',type=int,choices=[256,512,1024],default=1024)
     parser.add_argument('--reuse-app-image',action='store_true')
@@ -31,6 +32,7 @@ def preflight_options(args,free_bytes):
     if args.build_reserve_mib not in [256,512,1024]:raise ValueError('Unreviewed build reserve.')
     if args.enable_demo_team and not args.enable_hackathon_demo:raise ValueError('Demo team requires explicit hackathon demo approval.')
     if getattr(args,'enable_codex_accountant',False) and not (args.enable_demo_team and args.enable_hackathon_demo):raise ValueError('Codex requires the explicitly enabled fictional demo team.')
+    if getattr(args,'enable_codex_client',False) and not getattr(args,'enable_codex_accountant',False):raise ValueError('The Codex client requires the explicitly enabled Codex accountant.')
     reserve=0 if args.reuse_app_image else args.build_reserve_mib*1024**2
     if free_bytes-reserve<=FLOOR:raise ValueError('Capacity floor is not met.')
 
@@ -39,11 +41,14 @@ def app_build_command(args,release):
     if args.base_revision:result+=['--build-arg','BASE_IMAGE=quiet-ledger:'+args.base_revision]
     return result+['--tag','quiet-ledger:'+args.revision,str(release)]
 
-def render_environment(before,revision,public_origin,backend_host,hackathon,team,codex=False):
+def render_environment(before,revision,public_origin,backend_host,hackathon,team,codex=False,codex_client=False):
     if not isinstance(before,str) or '\0' in before or len(before)>1024*1024:raise ValueError('Invalid existing environment file.')
     replacements={'APP_REVISION':revision,'PUBLIC_ORIGIN':public_origin,'BACKEND_HOST':backend_host}
     if re.search(r'(?m)^DEMO_ACCOUNTANT_RUNTIME=codex$',before) and not codex:raise ValueError('Preserve the configured Codex accountant explicitly before deploying.')
+    if re.search(r'(?m)^DEMO_CLIENT_RUNTIME=codex$',before) and not codex_client:raise ValueError('Preserve the configured Codex client explicitly before deploying.')
+    if codex_client and not codex:raise ValueError('The Codex client requires the explicitly enabled Codex accountant.')
     if codex:replacements['DEMO_ACCOUNTANT_RUNTIME']='codex'
+    if codex_client:replacements['DEMO_CLIENT_RUNTIME']='codex'
     if hackathon:replacements['HACKATHON_DEMO_ENABLED']='true'
     elif not re.search(r'(?m)^HACKATHON_DEMO_ENABLED=',before):replacements['HACKATHON_DEMO_ENABLED']='false'
     if team:replacements['DEMO_TEAM_ENABLED']='true'
@@ -92,7 +97,7 @@ def codex_socket_path(root):
     if not stat.S_ISSOCK(info.st_mode) or info.st_uid!=RUNTIME_UID or stat.S_IMODE(info.st_mode)!=0o600:raise ValueError('Codex requires a private runtime-owned Unix socket.')
     return path
 
-def validate_codex_accountant(root):
+def validate_codex_accountant(root,client=False):
     path=codex_socket_path(root)
     class Connection(http.client.HTTPConnection):
         def connect(self):
@@ -107,6 +112,9 @@ def validate_codex_accountant(root):
         if response.status!=200 or len(data)>4096:raise ValueError('Codex bridge is unavailable.')
         health=json.loads(data)
         if health.get('runtime')!='codex' or health.get('model')!='gpt-6-luna' or health.get('reasoningEffort')!='max' or health.get('ready') is not True:raise ValueError('Codex bridge does not match the requested model and effort.')
+        if client:
+            roles=health.get('roles')
+            if not isinstance(roles,list) or len(roles)!=2 or any(not isinstance(role,str) for role in roles) or set(roles)!={'client','accountant'}:raise ValueError('Codex bridge does not support both fictional demo roles.')
     finally:connection.close()
 
 
@@ -126,9 +134,9 @@ def write_bound(path,data,expected):
     with path.open('r+b') as f:f.seek(0);f.write(data);f.truncate();f.flush();os.fsync(f.fileno())
 
 def phase(name,**values):print(json.dumps({'phase':name,**values}),flush=True)
-def run(args,log):
+def run(args,log,*,env=None):
     with log.open('ab') as stream:
-        result=subprocess.run(args,stdout=stream,stderr=subprocess.STDOUT)
+        result=subprocess.run(args,stdout=stream,stderr=subprocess.STDOUT,env=env)
     if result.returncode:raise RuntimeError('Deployment command failed; inspect the private deployment log.')
 
 def main():
@@ -149,11 +157,11 @@ def main():
         validate_demo_team(ROOT)
     if args.enable_codex_accountant:
         assert 'compose-codex.yml' in manifest['backend_files'],'Codex override is not in the reviewed release manifest.'
-        validate_codex_accountant(ROOT)
+        validate_codex_accountant(ROOT,client=getattr(args,'enable_codex_client',False))
     if args.reuse_app_image:require_local_image('quiet-ledger:'+args.revision)
     elif args.base_revision:require_local_image('quiet-ledger:'+args.base_revision)
     old_env=(ROOT/'.env').read_text() if (ROOT/'.env').exists() else ''
-    new_env=render_environment(old_env,args.revision,args.public_origin,args.backend_host,args.enable_hackathon_demo,args.enable_demo_team,args.enable_codex_accountant)
+    new_env=render_environment(old_env,args.revision,args.public_origin,args.backend_host,args.enable_hackathon_demo,args.enable_demo_team,args.enable_codex_accountant,getattr(args,'enable_codex_client',False))
     stamp=datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ');log=ROOT/('deploy-'+stamp+'.log');log.touch(mode=0o600)
     before=CADDY.read_bytes();updated=managed_config(before,args.backend_host)
     recovery=ROOT/'recovery';recovery.mkdir(mode=0o700,exist_ok=True)
@@ -178,7 +186,10 @@ def main():
     compose=['docker','compose','--project-directory',str(ROOT),'-f',str(ROOT/'compose.yml')]
     if args.enable_demo_team:compose+=['-f',str(ROOT/'compose.demo.yml')]
     if args.enable_codex_accountant:compose+=['-f',str(ROOT/'compose.codex.yml')]
-    run(compose+['up','-d','--no-build'],log)
+    # Compose interpolation gives the shell priority over .env. Pin the reviewed
+    # role choice so a caller's export cannot bypass or defeat this opt-in.
+    compose_env=dict(os.environ,DEMO_CLIENT_RUNTIME='codex' if getattr(args,'enable_codex_client',False) else 'hermes')
+    run(compose+['up','-d','--no-build'],log,env=compose_env)
     for _ in range(90):
         status=subprocess.check_output(['docker','inspect','--format','{{.State.Health.Status}}','quiet-ledger-app'],text=True).strip()
         if status=='healthy':break
@@ -194,6 +205,6 @@ def main():
         write_bound(CADDY,before,updated)
         run(['docker','exec','shc-frontdoor-caddy-1','caddy','reload','--config','/etc/caddy/Caddyfile','--adapter','caddyfile'],log)
         raise
-    result={'revision':args.revision,'public_origin':args.public_origin,'backend_host':args.backend_host,'backend_health':'healthy','hackathon_demo_enabled':'HACKATHON_DEMO_ENABLED=true' in new_env.splitlines(),'demo_team_enabled':args.enable_demo_team,'codex_accountant_enabled':args.enable_codex_accountant,'base_revision':args.base_revision,'reused_app_image':args.reuse_app_image,'caddy_before_sha256':hashlib.sha256(before).hexdigest(),'caddy_after_sha256':hashlib.sha256(updated).hexdigest(),'sibling_routes_preserved':True,'free_bytes':shutil.disk_usage(ROOT).free,'timestamp':stamp}
+    result={'revision':args.revision,'public_origin':args.public_origin,'backend_host':args.backend_host,'backend_health':'healthy','hackathon_demo_enabled':'HACKATHON_DEMO_ENABLED=true' in new_env.splitlines(),'demo_team_enabled':args.enable_demo_team,'codex_accountant_enabled':args.enable_codex_accountant,'codex_client_enabled':getattr(args,'enable_codex_client',False),'base_revision':args.base_revision,'reused_app_image':args.reuse_app_image,'caddy_before_sha256':hashlib.sha256(before).hexdigest(),'caddy_after_sha256':hashlib.sha256(updated).hexdigest(),'sibling_routes_preserved':True,'free_bytes':shutil.disk_usage(ROOT).free,'timestamp':stamp}
     (ROOT/'deployment.json').write_text(json.dumps(result,indent=2)+'\n');phase('backend-installed',**result)
 if __name__=='__main__':main()

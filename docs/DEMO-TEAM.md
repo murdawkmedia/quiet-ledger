@@ -11,9 +11,11 @@ of humour and asks who reviews the work. Neither represents Marmot or White Nois
 They compose short replies using a shared business brief, distinct personas and
 recent messages from the current conversation.
 
-An optional [Codex subscription backend](CODEX-DEMO.md) runs Jordan on Luna Max.
-Riley keeps Hermes. The footer identifies this selection; the default installation
-continues using Hermes for both. A failed earlier turn cannot cancel a newer
+An optional [Codex subscription backend](CODEX-DEMO.md) runs Jordan on Luna Max,
+with a separate explicit opt-in for Riley to use the same backend. Each keeps its
+own persona, fresh native turn and authenticated room history. The footer names
+the configured provider for each role; the default installation uses Hermes for
+both. No failed call silently changes providers. A failed earlier turn cannot cancel a newer
 question's waiting indicator. Encrypted queued sends retain their original ID
 when retried, so a refresh can track the correct eventual reply.
 
@@ -81,11 +83,11 @@ lease generation, expiry, pause, quotas and replay state. Agents never trigger
 other agents. Each reply refers to its human message so a delayed reply cannot
 finish an unrelated pending question.
 
-Pinned Hermes 0.22.5 AIAgent runs in a restricted container with no tools, personal
+The default pinned Hermes 0.22.5 AIAgent runs in a restricted container with no tools, personal
 profiles, memory, shell, file context, finance API or MCP credentials. Each turn
 uses a fresh temporary home and bounded lifetime. At most eight earlier,
 authenticated messages from this room enter its prompt, with character/byte limits.
-Hermes returns a finite intent and short prose. Financial answers discard model
+Each inference backend returns a finite intent and short prose. Financial answers discard model
 prose and render the latest verified case. Internal case version/time still guard
 stale replies; they are not printed as repeated bubble introductions. No reply
 changes financial state. Pending sends retry the same versioned idempotency key.

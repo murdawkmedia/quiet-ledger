@@ -17,8 +17,9 @@ export function loadDemoAgentRuntime(env:NodeJS.ProcessEnv){
   // HTTP is limited to a literal loopback or the isolated compose service name.
   if(endpoint.protocol==='http:'&&!['127.0.0.1','[::1]','hermes-demo'].includes(endpoint.hostname))throw new Error('The demo worker requires a private loopback or compose endpoint.');
   const origin=env.PUBLIC_ORIGIN;if(!origin)throw new Error('The demo team requires a public origin.');const relay=new URL('/marmot',origin);relay.protocol=relay.protocol==='https:'?'wss:':'ws:';
-  return {runtimeRoot,binaryPath,publicRelayUrl:relay.href,allowLoopbackRelays:env.SELF_HOSTED==='true'&&relay.protocol==='ws:',...(codex?{providers:{client:{runtime:'hermes' as const},accountant:{runtime:'codex' as const,model:codex.model,reasoningEffort:codex.reasoningEffort}}}:{}),async infer(role:DemoRole,text:string,caseDTO:DemoCase,requestId:string,signal:AbortSignal,history?:DemoConversationMessage[]):Promise<DemoInference>{
-    if(codex&&role==='accountant')return codex.infer(role,text,caseDTO,requestId,signal,history);
+  const codexProvider=codex?{runtime:'codex' as const,model:codex.model,reasoningEffort:codex.reasoningEffort}:undefined;
+  return {runtimeRoot,binaryPath,publicRelayUrl:relay.href,allowLoopbackRelays:env.SELF_HOSTED==='true'&&relay.protocol==='ws:',...(codex?{providers:{client:codex.roles.includes('client')?codexProvider!:{runtime:'hermes' as const},accountant:codexProvider!}}:{}),async infer(role:DemoRole,text:string,caseDTO:DemoCase,requestId:string,signal:AbortSignal,history?:DemoConversationMessage[]):Promise<DemoInference>{
+    if(codex&&codex.roles.includes(role))return codex.infer(role,text,caseDTO,requestId,signal,history);
     const response=await fetch(new URL('/infer',endpoint),{method:'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},body:JSON.stringify({role,text,case:caseDTO,requestId,...(history?{history}:{})}),signal:AbortSignal.any([signal,AbortSignal.timeout(32000)]),redirect:'error'});
     if(!response.ok)throw new Error('The isolated Hermes inference service is unavailable.');
     if(Number(response.headers.get('content-length')??0)>4096)throw new Error('The Hermes response exceeded its limit.');
