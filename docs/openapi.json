@@ -1540,7 +1540,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "type": "object",
+                  "properties": {
+                    "currencyBalances": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CurrencyBalanceSummary"
+                      }
+                    },
+                    "valuation": {
+                      "$ref": "#/components/schemas/CadReferenceValuation"
+                    }
+                  }
                 }
               }
             }
@@ -3335,6 +3346,110 @@
           "balance",
           "entries"
         ]
+      },
+      "CurrencyBalanceSummary": {
+        "type": "object",
+        "required": [
+          "currency",
+          "mode",
+          "invoiceCount",
+          "issued",
+          "paid",
+          "credited",
+          "voided",
+          "due",
+          "overpaid"
+        ],
+        "properties": {
+          "currency": {
+            "type": "string",
+            "enum": [
+              "CAD",
+              "USD",
+              "EUR",
+              "GBP",
+              "KRW"
+            ]
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "live",
+              "simulation"
+            ]
+          },
+          "invoiceCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "issued": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "paid": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "credited": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "voided": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "due": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "overpaid": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "description": "Integer minor-unit invoice values, separately grouped by currency and mode. Voided is unpaid residual retired, after credits. These are invoice allocations, not a wallet balance or current FX valuation."
+      },
+      "CadReferenceValuation": {
+        "type": "object",
+        "required": [
+          "invoicedCad",
+          "receivedCad",
+          "availableCad",
+          "spentCad"
+        ],
+        "properties": {
+          "invoicedCad": {
+            "type": "string",
+            "enum": [
+              "reference_only"
+            ]
+          },
+          "receivedCad": {
+            "type": "string",
+            "enum": [
+              "saved_quote_or_simulation"
+            ]
+          },
+          "availableCad": {
+            "type": "string",
+            "enum": [
+              "simulation_only"
+            ]
+          },
+          "spentCad": {
+            "type": "string",
+            "enum": [
+              "simulation_only"
+            ]
+          }
+        }
       }
     }
   }

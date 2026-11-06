@@ -26,6 +26,7 @@ import type {ReceivingAdapter} from '../shared/receiving.js';
 import {ReceivingService,type QuoteReceiving} from './receiving-service.js';
 import {InvoiceLedger} from './invoice-ledger.js';
 import {invoiceLedgerRouter} from './invoice-ledger-router.js';
+import {summarizeInvoiceBalances,CAD_REFERENCE_VALUATION} from '../shared/currency-report.js';
 import {quoteReceiving} from './receiving-quote.js';
 import {inspectCollateral,type CollateralConfig} from '../integrations/collateral.js';
 import {inspectArk,type ArkConnectionConfig} from '../integrations/ark-receiving.js';
@@ -403,7 +404,7 @@ export function createApp(options: AppOptions) {
     const receivedCad = invoices.reduce((sum,invoice)=>sum+(invoice.settlementMode==='live'?invoiceLedger.receivedCad(invoice,workspace):invoice.status==='paid'?receivedValue(invoice.paymentMethod!,invoice.totalCad):0),0);
     const payoutEligibleCad=invoices.filter(invoice=>invoice.status==='paid'&&invoice.settlementMode!=='live'&&canFundPayout(invoice.paymentMethod)).reduce((sum,invoice)=>sum+invoice.totalCad,0);
     const spentCad = payouts.filter(payout => payout.status !== 'quoted').reduce((sum, payout) => sum + payout.totalDebit, 0);
-    res.json({ totals: { invoicedCad, receivedCad, availableCad: payoutEligibleCad - spentCad, spentCad }, invoices, payouts, activity: store.audits(workspace) });
+    res.json({ totals: { invoicedCad, receivedCad, availableCad: payoutEligibleCad - spentCad, spentCad },currencyBalances:summarizeInvoiceBalances(invoices),valuation:CAD_REFERENCE_VALUATION, invoices, payouts, activity: store.audits(workspace) });
   });
   app.get('/api/payment-methods',(_req,res)=>{const workspace=(res.locals.session as StoredSession).workspace;res.json({methods:METHOD_DEFINITIONS,adapters:receivingFor(workspace).metadata(),walletOptions:walletOptions(workspace),defaultMode:'live'});});
   app.get('/api/payment-reports',(_req,res)=>res.json({reports:paymentReports.list((res.locals.session as StoredSession).workspace)}));
@@ -479,7 +480,7 @@ export function createApp(options: AppOptions) {
     const invoices = records.map(invoice=>invoiceLedger.withBalance(invoice,workspace)).map(({ token: _token, receiptToken: _receiptToken, ...invoice }) => invoice);
     const payments = records.flatMap(invoice=>invoiceLedger.paymentRecords(invoice,workspace));
     const mode=payments.some(payment=>payment.mode==='live')?'mixed':'simulation';
-    res.attachment('quiet-ledger-records.json').json({ schemaVersion: 1, mode, exportedAt: now().toISOString(), verification: mode==='simulation'?'Locally generated simulation records. Not bank-authenticated or lender-accepted evidence.':'Live receiving and simulation records are labelled individually. Manual review is distinct from provider verification; no lender acceptance is implied.', invoices, payments, payouts: store.listPayouts(workspace), activity: store.audits(workspace, true) });
+    res.attachment('quiet-ledger-records.json').json({ schemaVersion: 1, mode,currencyBalances:summarizeInvoiceBalances(invoices),valuation:CAD_REFERENCE_VALUATION, exportedAt: now().toISOString(), verification: mode==='simulation'?'Locally generated simulation records. Not bank-authenticated or lender-accepted evidence.':'Live receiving and simulation records are labelled individually. Manual review is distinct from provider verification; no lender acceptance is implied.', invoices, payments, payouts: store.listPayouts(workspace), activity: store.audits(workspace, true) });
   });
   app.get('/api/scenario', (_req, res) => {
     if ((res.locals.session as StoredSession).role !== 'owner') throw new DomainError(403, 'This scenario is available only to the private owner workspace.');

@@ -2,6 +2,7 @@ export type Currency = 'CAD' | 'USD' | 'EUR' | 'GBP' | 'KRW';
 export type {PaymentMethod} from './payment-methods.js';
 import type {PaymentMethod} from './payment-methods.js';
 import type {InvoiceBalance} from './invoice-ledger.js';
+import type {CurrencyBalanceSummary,CAD_REFERENCE_VALUATION} from './currency-report.js';
 export interface InvoiceItem { description: string; quantity: number; unitAmount: number }
 /** Billing details captured when the invoice is issued; later contact edits do not change them. */
 export interface InvoiceBilling {
@@ -43,6 +44,7 @@ export interface SessionView {
   demoAvailable?:boolean;hackathonDemo?:boolean;marmotAvailable?:boolean;
 }
 export interface Dashboard {
+  currencyBalances?:CurrencyBalanceSummary[];valuation?:typeof CAD_REFERENCE_VALUATION;
   totals: { invoicedCad: number; receivedCad: number; availableCad: number; spentCad: number };
   invoices: Invoice[]; payouts: Payout[]; activity: AuditEvent[];
 }

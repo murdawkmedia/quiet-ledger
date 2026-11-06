@@ -68,7 +68,8 @@ receiving and redemption remain unimplemented.
   at issue time, invoice/receipt printing, CAD/USD/KRW/EUR/GBP, discounts, premiums,
   accepted-method controls and private checkout links.
 - [Deposits and invoice balances](docs/INVOICE-LEDGER.md), separate installment
-  receipts, credits, unpaid voids and exact currency CSV exports.
+  receipts, credits, unpaid voids and exact currency CSV exports. Dashboard and
+  Records report balances by invoice currency, with live/simulation rows separate.
 - Direct two-person Marmot rooms with explicit invitations, a separate messaging
   identity, a public-key QR and passphrase-encrypted browser storage.
 - [Invoice email](docs/INVOICE-EMAIL.md), optional inbox reading, reviewed threaded

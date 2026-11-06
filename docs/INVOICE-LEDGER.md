@@ -58,3 +58,21 @@ Saved clients, email and Marmot conversations continue to use the same invoice.
 Demo payments remain simulation-only. Actual wallet/provider connection and
 funded acceptance remain separate from the controlled fixture tests. Native Cashu
 receiving and automatic outgoing execution are not added by this ledger phase.
+
+
+## Currency reporting
+
+Dashboard and Records show invoice balances in each original currency, with live
+and simulation rows separate. Issued is the sum of original invoice totals.
+Payment value is the invoice amount allocated by its receipts; it is not a wallet
+asset balance. Credits reduce unpaid due. Voided balance is the remaining amount
+retired by voiding, after any credits. Overpaid value remains a separate column.
+KRW uses whole won; no amount is converted using a guessed exchange rate.
+
+JSON evidence includes the same `currencyBalances` and `valuation` metadata under
+the existing `records:read` scope. The older `totals` CAD fields remain compatible.
+`invoicedCad` is `reference_only`: unpaid foreign-currency invoices retain fixed
+MVP reference conversions, and settled values can use saved receipt quotes.
+`receivedCad` uses saved quotes or simulation values; it is not a current FX quote
+or bank balance. `availableCad` and `spentCad` are simulation-only. The UI labels
+these older owner values as CAD references and does not call their ratio collected.
