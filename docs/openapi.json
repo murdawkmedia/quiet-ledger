@@ -2492,9 +2492,10 @@
               "USD",
               "EUR",
               "GBP",
-              "KRW"
+              "KRW",
+              "SAT"
             ],
-            "description": "Amounts use currency minor units: KRW is whole won; CAD, USD, EUR and GBP use cents."
+            "description": "Amounts use currency minor units: KRW is whole won; CAD, USD, EUR and GBP use cents. SAT uses whole satoshis with no fiat conversion and no CAD reference value."
           },
           "items": {
             "type": "array",
@@ -2587,6 +2588,16 @@
             "type": "string",
             "maxLength": 2000,
             "description": "Client-facing plain-text payment terms, separate from owner note."
+          },
+          "methodPricing": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MethodPricingRule"
+            },
+            "minItems": 1,
+            "maxItems": 27,
+            "uniqueItems": false,
+            "description": "Optional per-method price rules. Only the owner workspace can create priced invoices; each method appears at most once and each rule needs a nonzero discount or premium. The payer must confirm one server-computed offer at the public checkout before any payment; the agreed effective total then becomes the settlement target."
           }
         },
         "required": [
@@ -2623,9 +2634,10 @@
               "USD",
               "EUR",
               "GBP",
-              "KRW"
+              "KRW",
+              "SAT"
             ],
-            "description": "Amounts use currency minor units: KRW is whole won; CAD, USD, EUR and GBP use cents."
+            "description": "Amounts use currency minor units: KRW is whole won; CAD, USD, EUR and GBP use cents. SAT uses whole satoshis with no fiat conversion and no CAD reference value."
           },
           "items": {
             "type": "array",
@@ -2670,7 +2682,8 @@
           },
           "totalCad": {
             "type": "integer",
-            "minimum": 0
+            "minimum": 0,
+            "description": "Labelled CAD reference value. Absent for SAT invoices, which have no fiat conversion."
           },
           "amountSats": {
             "type": "integer",
@@ -2818,6 +2831,19 @@
             "type": "string",
             "maxLength": 2000,
             "description": "Client-facing plain-text payment terms, separate from owner note."
+          },
+          "methodPricing": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MethodPricingRule"
+            },
+            "minItems": 1,
+            "maxItems": 27,
+            "uniqueItems": false,
+            "description": "Issued per-method price rules, exactly as stored on the invoice."
+          },
+          "priceAgreement": {
+            "$ref": "#/components/schemas/MethodPriceAgreement"
           }
         },
         "required": [
@@ -2880,6 +2906,11 @@
             "minimum": 1,
             "maximum": 1000000000,
             "description": "Optional deposit or installment in invoice currency minor units. Defaults to current amount due. Creation above due is rejected before contacting the provider."
+          },
+          "agreementId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Exact method price agreement ID from the invoice's priceAgreement. Required for a method-priced invoice; requests are bound to the payer-confirmed agreement and fail closed without it. Rejected on invoices without method pricing."
           }
         },
         "required": [
@@ -2981,7 +3012,8 @@
               "USD",
               "EUR",
               "GBP",
-              "KRW"
+              "KRW",
+              "SAT"
             ]
           },
           "expectedAtomic": {
@@ -3076,6 +3108,11 @@
           },
           "reviewReason": {
             "type": "string"
+          },
+          "agreementId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stored agreement binding; the request keeps this exact agreement, method and amount across retries and recovery."
           }
         },
         "required": [
@@ -3234,7 +3271,8 @@
           "total": {
             "type": "integer",
             "minimum": 0,
-            "maximum": 9007199254740991
+            "maximum": 9007199254740991,
+            "description": "Original issued total; immutable."
           },
           "paid": {
             "type": "integer",
@@ -3263,9 +3301,10 @@
               "USD",
               "EUR",
               "GBP",
-              "KRW"
+              "KRW",
+              "SAT"
             ],
-            "description": "Amounts use currency minor units: KRW is whole won; CAD, USD, EUR and GBP use cents."
+            "description": "Amounts use currency minor units: KRW is whole won; CAD, USD, EUR and GBP use cents. SAT uses whole satoshis with no fiat conversion and no CAD reference value."
           },
           "state": {
             "type": "string",
@@ -3283,10 +3322,17 @@
               "live",
               "simulation"
             ]
+          },
+          "effectiveTotal": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "Authoritative settlement target: the confirmed agreement's effective total, or the issued total without an agreement. paid, credited, due and overpaid are measured against it."
           }
         },
         "required": [
           "total",
+          "effectiveTotal",
           "paid",
           "credited",
           "due",
@@ -3388,11 +3434,15 @@
           "mode",
           "invoiceCount",
           "issued",
+          "effective",
           "paid",
           "credited",
           "voided",
           "due",
-          "overpaid"
+          "overpaid",
+          "methodDiscount",
+          "methodPremium",
+          "methodTaxAdjustment"
         ],
         "properties": {
           "currency": {
@@ -3402,7 +3452,8 @@
               "USD",
               "EUR",
               "GBP",
-              "KRW"
+              "KRW",
+              "SAT"
             ]
           },
           "mode": {
@@ -3446,6 +3497,28 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 9007199254740991
+          },
+          "effective": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "Sum of authoritative effective totals (confirmed method-price targets)."
+          },
+          "methodDiscount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "Sum of agreed method discounts."
+          },
+          "methodPremium": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "Sum of agreed method premiums."
+          },
+          "methodTaxAdjustment": {
+            "type": "integer",
+            "description": "Signed sum of agreed effectiveTax minus issued tax."
           }
         },
         "description": "Integer minor-unit invoice values, separately grouped by currency and mode. Voided is unpaid residual retired, after credits. These are invoice allocations, not a wallet balance or current FX valuation."
@@ -3484,6 +3557,224 @@
             ]
           }
         }
+      },
+      "MethodPricingRule": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "method": {
+            "type": "string",
+            "enum": [
+              "bitcoin",
+              "liquid",
+              "lightning",
+              "bank",
+              "card",
+              "cash",
+              "check",
+              "gift_card",
+              "coupon",
+              "apple_pay",
+              "google_pay",
+              "cash_app_pay",
+              "interac",
+              "ach",
+              "sepa",
+              "wire",
+              "venmo",
+              "paypal",
+              "revolut_pay",
+              "no_charge",
+              "usdt",
+              "usdc",
+              "ideal",
+              "pay_by_bank",
+              "stripe_dynamic",
+              "cashu",
+              "ark"
+            ],
+            "description": "Canonical payment method this rule prices. Client-facing aliases (square, bank_transfer) are rejected."
+          },
+          "discountBps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000,
+            "description": "Optional method-only discount in basis points on the adjustment-eligible subtotal."
+          },
+          "premiumBps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000,
+            "description": "Optional method-only premium in basis points on the adjustment-eligible subtotal."
+          }
+        },
+        "required": [
+          "method"
+        ]
+      },
+      "MethodPriceAgreement": {
+        "type": "object",
+        "description": "The single payer-confirmed method price for an invoice, created only by the public checkout token. The effectiveTotal is the authoritative settlement target. Owner reads include invoiceId and referenceTotalCad; public projections omit them.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "invoiceId": {
+            "type": "string",
+            "description": "Owner read only."
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "bitcoin",
+              "liquid",
+              "lightning",
+              "bank",
+              "card",
+              "cash",
+              "check",
+              "gift_card",
+              "coupon",
+              "apple_pay",
+              "google_pay",
+              "cash_app_pay",
+              "interac",
+              "ach",
+              "sepa",
+              "wire",
+              "venmo",
+              "paypal",
+              "revolut_pay",
+              "no_charge",
+              "usdt",
+              "usdc",
+              "ideal",
+              "pay_by_bank",
+              "stripe_dynamic",
+              "cashu",
+              "ark"
+            ]
+          },
+          "offerHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "confirmedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "confirmation": {
+            "type": "string",
+            "enum": [
+              "public_checkout_token"
+            ]
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "CAD",
+              "USD",
+              "EUR",
+              "GBP",
+              "KRW",
+              "SAT"
+            ]
+          },
+          "eligibleSubtotal": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "issuedSubtotal": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "issuedDiscountAmount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "issuedPremiumAmount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "issuedTax": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "issuedTotal": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "discountBps": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "premiumBps": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "discountAmount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "premiumAmount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "adjustedSubtotal": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "effectiveTax": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "taxAdjustment": {
+            "type": "integer",
+            "description": "Signed: effectiveTax minus issued tax."
+          },
+          "effectiveTotal": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalAdjustment": {
+            "type": "integer",
+            "description": "Signed: effectiveTotal minus issuedTotal."
+          },
+          "referenceTotalCad": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Owner read only. Labelled CAD reference; absent for SAT invoices."
+          },
+          "referenceAmountSats": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Legacy whole-satoshi reference at the fixed MVP rate."
+          }
+        },
+        "required": [
+          "id",
+          "method",
+          "offerHash",
+          "confirmedAt",
+          "confirmation",
+          "currency",
+          "eligibleSubtotal",
+          "issuedSubtotal",
+          "issuedDiscountAmount",
+          "issuedPremiumAmount",
+          "issuedTax",
+          "issuedTotal",
+          "discountBps",
+          "premiumBps",
+          "discountAmount",
+          "premiumAmount",
+          "adjustedSubtotal",
+          "effectiveTax",
+          "taxAdjustment",
+          "effectiveTotal",
+          "totalAdjustment"
+        ]
       }
     }
   }

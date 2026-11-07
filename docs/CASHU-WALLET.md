@@ -32,6 +32,11 @@ makes no mint connection, creates no extra invoice and performs no payment.
 Quiet Ledger opens no wallet URI automatically. Never paste ecash tokens, seeds,
 private keys or recovery words into a payment page.
 
+A method-priced invoice shows its confirmed Lightning price before this guide;
+the handoff never selects an ecash price, changes the agreed amount or produces
+a Cashu receipt. The Lightning request and its verification stay a Lightning
+flow.
+
 ## What the receipt means
 
 The receipt says **Lightning**. Selecting the Cashu guide cannot prove the origin
@@ -43,3 +48,10 @@ This release has controlled adapter, browser and end-to-end fixture tests. It ha
 not been qualified with a funded independently operated Cashu wallet/mint. It
 implements no direct ecash receiving, minting, swapping, melting or token storage.
 The [November plan](NUT-NOVEMBER.md) keeps direct ecash as a separate future design.
+
+Operators with a separately prepared receive journal can use the offline
+[Cashu recovery tooling](CASHU-RECOVERY.md) to inspect one operation, ask the
+mint for the already-persisted blinded outputs (NUT-09), check input state
+(NUT-07) or protect the journal with a key-separated backup. That tool is
+read-only by default, requires explicit apply and an exact mint confirmation,
+never credits an invoice and is not part of this payer guide.

@@ -21,10 +21,13 @@ import {InvoiceDelivery,type InvoiceDeliveryOptions} from './invoice-delivery.js
 import {invoiceAllowsMethod,invoiceRequiresManualReport} from '../shared/invoice-options.js';
 import {PaymentReports} from './payment-reports.js';
 import {METHOD_DEFINITIONS,PAYMENT_METHOD_IDS,methodInfo,receivedValue,canFundPayout} from '../shared/payment-methods.js';
+import type {MethodId} from '../shared/payment-methods.js';
 import {WALLET_OPTIONS} from '../shared/wallet-options.js';
 import type {ReceivingAdapter} from '../shared/receiving.js';
+import {receivingAdapterSupportsCurrency} from '../shared/receiving.js';
 import {ReceivingService,type QuoteReceiving} from './receiving-service.js';
 import {InvoiceLedger} from './invoice-ledger.js';
+import {MethodPriceAgreements} from './method-pricing.js';
 import {invoiceLedgerRouter} from './invoice-ledger-router.js';
 import {recurringDraftsRouter} from './recurring-drafts-router.js';
 import {businessRecordsRouter} from './business-records-router.js';
@@ -121,8 +124,11 @@ export function createApp(options: AppOptions) {
   const assertPublicWorkspace=(workspace:string)=>{if(isHackathonWorkspace(workspace)&&(!demoEnabled||!hackathonDemo!.hasWorkspace(workspace)))throw new DomainError(404,'This demo visit is unavailable or expired.');};
   const denyDemoFinancial=(workspace:string)=>{if(isHackathonWorkspace(workspace))throw new DomainError(403,'Use the signed-in demo tour to simulate this fictional payment.');};
   const invoiceLedger=new InvoiceLedger(store);
-  const squareSandbox=new SquareSandbox(store,options.squareSandbox,now);
-  const paymentReports=new PaymentReports(store);
+  // One shared method-pricing service: receiving, reports, sandbox, demo and ledger
+  // projections all read the same protected agreement table.
+  const methodPricing=invoiceLedger.agreements;
+  const squareSandbox=new SquareSandbox(store,options.squareSandbox,now,methodPricing);
+  const paymentReports=new PaymentReports(store,methodPricing);
   const invoiceTemplates=new InvoiceTemplates(store);
   let emailInbox:InvoiceEmailInbox;
   const invoiceEmail=new InvoiceDelivery(store,{...options.invoiceEmail,publicOrigin:hosted?.publicOrigin??options.invoiceEmail?.publicOrigin??'http://localhost:4317',allowInsecureLoopback:hosted?.allowInsecureLoopback??options.invoiceEmail?.allowInsecureLoopback??!hosted,now,
@@ -132,8 +138,8 @@ export function createApp(options: AppOptions) {
   emailInbox=new InvoiceEmailInbox(store,{...options.emailInbox,now,threads:invoiceThreads,credentialFor:workspace=>invoiceEmail.credentialForInbox(workspace)});
   const threadEmail=new ThreadEmailService(store,{delivery:invoiceEmail,inbox:emailInbox,threads:invoiceThreads,now});
   const communications=store.encrypted?createCommunicationsRuntime({store,inbox:emailInbox,threads:invoiceThreads,replies:threadEmail,delivery:invoiceEmail,now,networkFactory:options.communications?.networkFactory}):undefined;
-  const receiving=new ReceivingService(store,hosted?[manualReceiving]:options.receivingAdapters??[],options.receivingQuote??quoteReceiving,now);
-  const demoReceiving=hosted?new ReceivingService(store,[],options.receivingQuote??quoteReceiving,now):undefined;
+  const receiving=new ReceivingService(store,hosted?[manualReceiving]:options.receivingAdapters??[],options.receivingQuote??quoteReceiving,now,undefined,methodPricing);
+  const demoReceiving=hosted?new ReceivingService(store,[],options.receivingQuote??quoteReceiving,now,undefined,methodPricing):undefined;
   const accountConnections=hosted?createAccountConnections({store,publicOrigin:hosted.publicOrigin,now,getSession:(_req,res)=>res.locals.session,fetcher:options.connectionFetcher,allowInsecureLoopback:hosted.allowInsecureLoopback}):undefined;
   const scopedReceiving=new Map<string,{revision:string;service:ReceivingService}>();
   const receivingFor=(workspace:string)=>{
@@ -142,7 +148,7 @@ export function createApp(options: AppOptions) {
     const revision=accountConnections.revision(workspace);let cached=scopedReceiving.get(workspace);
     if(!cached||cached.revision!==revision){
       const adapters=[...accountConnections.adaptersForWorkspace(workspace),...(options.receivingAdaptersForWorkspace?.(workspace)??[manualReceiving])];
-      cached={revision,service:new ReceivingService(store,adapters,options.receivingQuote??quoteReceiving,now,hosted?.publicOrigin)};
+      cached={revision,service:new ReceivingService(store,adapters,options.receivingQuote??quoteReceiving,now,hosted?.publicOrigin,methodPricing)};
       if(scopedReceiving.size>=128)scopedReceiving.delete(scopedReceiving.keys().next().value!);scopedReceiving.set(workspace,cached);
     }return cached.service;
   };
@@ -286,24 +292,58 @@ export function createApp(options: AppOptions) {
     establishSession(req, res, 'owner');
   });
 
+  // Checkout offer eligibility matches the checkout payment surface: with live receiving
+  // configured only adapter-served methods are payable; otherwise simulation applies.
+  const checkoutPayable=(workspace:string,demo:boolean,currency:string)=>(method:MethodId)=>{
+    if(demo)return false;
+    if((hosted||workspace==='owner')&&receivingFor(workspace).hasLive())return receivingFor(workspace).adapters.some(adapter=>adapter.mode==='live'&&adapter.methods.includes(method)&&receivingAdapterSupportsCurrency(adapter,currency,method));
+    return true;
+  };
   app.get('/api/checkout/:token', async (req, res) => {
     const found = store.getCheckout(param(req, 'token'));
     if (!found) throw new DomainError(404, 'Checkout not found.');
     assertPublicWorkspace(found.workspace);
     const demo=isHackathonWorkspace(found.workspace);
-    const requestText = `DEMO-ONLY:quiet-ledger:${found.invoice.number}:${found.invoice.amountSats}:sats`;
-    const qrDataUrl = await QRCode.toDataURL(requestText, { width: 240, margin: 1, color: { dark: '#163b2d', light: '#ffffff' } });
-    res.json({ invoice: publicView(found.invoice), payment: { mode: 'simulation', amountSats: found.invoice.amountSats, request: requestText, qrDataUrl }, report:paymentReports.forInvoice(found.invoice.id),adapters:demo?[]:(hosted||found.workspace==='owner')?receivingFor(found.workspace).metadata():[],...(hosted?{conversationAvailable:true}:{}),...(demo?{hackathonDemo:true}:{}), ...(found.invoice.receiptToken ? { receiptToken: found.invoice.receiptToken } : {}) });
+    const agreement=invoiceLedger.agreementFor(found.invoice,found.workspace);
+    // A required method-price lock hides the base-price simulation QR until confirmed.
+    const pendingPricing=Boolean(found.invoice.methodPricing?.length)&&!agreement;
+    const requestText = `DEMO-ONLY:quiet-ledger:${found.invoice.number}:${agreement?.referenceAmountSats??found.invoice.amountSats}:sats`;
+    const qrDataUrl = pendingPricing?null:await QRCode.toDataURL(requestText, { width: 240, margin: 1, color: { dark: '#163b2d', light: '#ffffff' } });
+    res.json({ invoice: publicView(found.invoice), payment: pendingPricing?null:{ mode: 'simulation', amountSats: agreement?.referenceAmountSats??found.invoice.amountSats, request: requestText, qrDataUrl },
+      pricingOffers:pendingPricing?methodPricing.offers(found.workspace,found.invoice,checkoutPayable(found.workspace,demo,found.invoice.currency)):[],
+      report:paymentReports.forInvoice(found.invoice.id),adapters:demo?[]:(hosted||found.workspace==='owner')?receivingFor(found.workspace).metadata():[],...(hosted?{conversationAvailable:true}:{}),...(demo?{hackathonDemo:true}:{}), ...(found.invoice.receiptToken ? { receiptToken: found.invoice.receiptToken } : {}) });
+  });
+  app.post('/api/checkout/:token/method-agreement',sameOrigin,(req,res)=>{
+    const checkoutToken=param(req,'token');
+    // Resolve and authorize the checkout before the service reads any saved idempotent
+    // response, so a revoked link can never replay an earlier confirmation.
+    const found=store.getCheckout(checkoutToken);
+    if(!found)throw new DomainError(404,'Checkout not found.');
+    assertPublicWorkspace(found.workspace);
+    denyDemoFinancial(found.workspace);
+    const input=parse(z.object({method:z.string().min(1).max(40),offerHash:z.string().regex(/^[0-9a-f]{64}$/)}).strict(),req.body);
+    const confirmation=methodPricing.confirm({checkoutToken,...input},idempotencyKey(req),checkoutPayable(found.workspace,isHackathonWorkspace(found.workspace),found.invoice.currency));
+    res.status(201).json(confirmation);
   });
   app.post('/api/checkout/:token/pay', sameOrigin, (req, res) => {
     const checkoutToken = param(req, 'token');
-    const checkout=store.getCheckout(checkoutToken);if(checkout)denyDemoFinancial(checkout.workspace);
-    const input = parse(z.object({ method: z.enum(PAYMENT_METHOD_IDS) }).strict(), req.body);
+    const checkout=store.getCheckout(checkoutToken);
+    if(!checkout)throw new DomainError(404,'Checkout not found.');
+    denyDemoFinancial(checkout.workspace);
+    assertPublicWorkspace(checkout.workspace);
+    const input = parse(z.object({ method: z.enum(PAYMENT_METHOD_IDS),agreementId:z.string().uuid().optional() }).strict(), req.body);
     const result = store.idempotent('public-payment', idempotencyKey(req), { checkout: hash(checkoutToken), ...input }, 200, () => {
       const found = store.getCheckout(checkoutToken);
       if (!found) throw new DomainError(404, 'Checkout not found.');
       const balance=invoiceLedger.balance(found.invoice,found.workspace);
-      if(found.invoice.status!=='paid'&&(balance.due!==found.invoice.total||balance.state==='void'))throw new DomainError(409,'An adjusted invoice requires its current live receiving flow.');
+      // A method-priced invoice settles only its explicitly confirmed effective price.
+      const agreement=invoiceLedger.agreementFor(found.invoice,found.workspace);
+      if(found.invoice.methodPricing?.length&&!agreement)throw new DomainError(409,'Confirm a payment-method price before paying this invoice.','METHOD_AGREEMENT_REQUIRED');
+      if(agreement){
+        if(input.agreementId===undefined||input.agreementId!==agreement.id)throw new DomainError(409,'This payment does not reference the confirmed method price.','METHOD_AGREEMENT_MISMATCH');
+        if(input.method!==agreement.method&&!(input.method==='square'&&agreement.method==='card')&&!(input.method==='bank_transfer'&&agreement.method==='bank'))throw new DomainError(409,'This payment method does not match the confirmed method price.','METHOD_AGREEMENT_MISMATCH');
+      }
+      if(found.invoice.status!=='paid'&&(balance.due!==balance.effectiveTotal||balance.state==='void'))throw new DomainError(409,'An adjusted invoice requires its current live receiving flow.');
       if((hosted||found.workspace==='owner')&&receivingFor(found.workspace).hasLive())throw new DomainError(409,'This business uses live receiving. Choose a configured live payment method.');
       if(!invoiceAllowsMethod(found.invoice,input.method))throw new DomainError(400,'This payment method is not accepted for this invoice.');
       if(found.invoice.status!=='paid'&&invoiceRequiresManualReport(found.invoice,input.method))return {invoice:publicView(found.invoice),alreadyPaid:false,report:paymentReports.report(found.workspace,found.invoice.id,input.method,now())};
@@ -328,9 +368,10 @@ export function createApp(options: AppOptions) {
     res.json({request:await receivingForToken(param(req,'token')).checkPublic(param(req,'token'),input)});
   });
   app.post('/api/checkout/:token/receiving',sameOrigin,async(req,res)=>{
-    const input=parse(z.object({method:z.enum(METHOD_DEFINITIONS.map(row=>row.id)),adapterId:z.string().min(1).max(192),amount:z.number().int().min(1).max(1_000_000_000).optional()}).strict(),req.body);
+    const input=parse(z.object({method:z.enum(METHOD_DEFINITIONS.map(row=>row.id)),adapterId:z.string().min(1).max(192),amount:z.number().int().min(1).max(1_000_000_000).optional(),agreementId:z.string().uuid().optional()}).strict(),req.body);
     const found=store.getCheckout(param(req,'token'));if(!found||(!hosted&&found.workspace!=='owner'))throw new DomainError(404,'Live receiving invoice not found.');
     denyDemoFinancial(found.workspace);
+    // The checkout token remains the public authority; agreementId is only a price binding.
     res.status(201).json({request:await receivingFor(found.workspace).create(found.workspace,{invoiceId:found.invoice.id,...input},idempotencyKey(req))});
   });
 
@@ -402,9 +443,13 @@ export function createApp(options: AppOptions) {
     const workspace = (res.locals.session as StoredSession).workspace;
     const invoices = store.listInvoices(workspace).map(invoice=>invoiceLedger.withBalance(invoice,workspace));
     const payouts = store.listPayouts(workspace);
-    const invoicedCad = invoices.reduce((sum, invoice) => sum + invoice.totalCad, 0);
-    const receivedCad = invoices.reduce((sum,invoice)=>sum+(invoice.settlementMode==='live'?invoiceLedger.receivedCad(invoice,workspace):invoice.status==='paid'?receivedValue(invoice.paymentMethod!,invoice.totalCad):0),0);
-    const payoutEligibleCad=invoices.filter(invoice=>invoice.status==='paid'&&invoice.settlementMode!=='live'&&canFundPayout(invoice.paymentMethod)).reduce((sum,invoice)=>sum+invoice.totalCad,0);
+    // CAD reference totals cover fiat-denominated invoices only. SAT invoices have no
+    // fiat conversion and are reported separately through currencyBalances. A method
+    // agreement settles at its own effective reference, never the original CAD value.
+    const effectiveCadReference=(invoice:typeof invoices[number])=>invoice.priceAgreement?.referenceTotalCad??invoice.totalCad!;
+    const invoicedCad = invoices.reduce((sum, invoice) => sum + (invoice.currency==='SAT'?0:invoice.totalCad!), 0);
+    const receivedCad = invoices.reduce((sum,invoice)=>sum+(invoice.currency==='SAT'?0:invoice.settlementMode==='live'?invoiceLedger.receivedCad(invoice,workspace):invoice.status==='paid'?receivedValue(invoice.paymentMethod!,effectiveCadReference(invoice)):0),0);
+    const payoutEligibleCad=invoices.filter(invoice=>invoice.status==='paid'&&invoice.settlementMode!=='live'&&invoice.currency!=='SAT'&&canFundPayout(invoice.paymentMethod)).reduce((sum,invoice)=>sum+effectiveCadReference(invoice),0);
     const spentCad = payouts.filter(payout => payout.status !== 'quoted').reduce((sum, payout) => sum + payout.totalDebit, 0);
     res.json({ totals: { invoicedCad, receivedCad, availableCad: payoutEligibleCad - spentCad, spentCad },currencyBalances:summarizeInvoiceBalances(invoices),valuation:CAD_REFERENCE_VALUATION, invoices, payouts, activity: store.audits(workspace) });
   });
@@ -433,7 +478,7 @@ export function createApp(options: AppOptions) {
   app.get('/api/receiving/:id',(req,res)=>{const workspace=(res.locals.session as StoredSession).workspace;res.json({request:receivingFor(workspace).read(param(req,'id'),workspace)});});
   app.post('/api/receiving',async(req,res)=>{
     const workspace=(res.locals.session as StoredSession).workspace;
-    const input=parse(z.object({invoiceId:z.string().min(1).max(128),method:z.enum(METHOD_DEFINITIONS.map(row=>row.id)),adapterId:z.string().min(1).max(192),amount:z.number().int().min(1).max(1_000_000_000).optional()}).strict(),req.body);
+    const input=parse(z.object({invoiceId:z.string().min(1).max(128),method:z.enum(METHOD_DEFINITIONS.map(row=>row.id)),adapterId:z.string().min(1).max(192),amount:z.number().int().min(1).max(1_000_000_000).optional(),agreementId:z.string().uuid().optional()}).strict(),req.body);
     res.status(201).json({request:await receivingFor(workspace).create(workspace,input,idempotencyKey(req))});
   });
   app.post('/api/receiving/:id/recover',async(req,res)=>{const workspace=(res.locals.session as StoredSession).workspace;parse(z.object({}).strict(),req.body??{});res.json({request:await receivingFor(workspace).recover(param(req,'id'),workspace)});});
@@ -453,6 +498,9 @@ export function createApp(options: AppOptions) {
   app.post('/api/invoices/:id/revoke-links',(req,res)=>{const workspace=(res.locals.session as StoredSession).workspace;parse(z.object({}).strict(),req.body??{});sendResult(res,store.idempotent('revoke-links:'+workspace,idempotencyKey(req),{id:param(req,'id')},200,()=>store.revokeInvoiceLinks(param(req,'id'),workspace,now().toISOString())));});
   app.post('/api/invoices', (req, res) => {
     const workspace = (res.locals.session as StoredSession).workspace;
+    // Local demo sessions cannot issue method-priced invoices: their agreements have no
+    // demo retention path. Owner and hosted account workspaces keep full support.
+    if((res.locals.session as StoredSession).role!=='owner'&&typeof req.body==='object'&&req.body!==null&&'methodPricing'in req.body)throw new DomainError(403,'Method-priced invoices require the private owner workspace.');
     const result = store.idempotent(`invoice:${workspace}`, idempotencyKey(req), req.body, 201, () => createInvoice(store, workspace, req.body, now()));
     sendResult(res, result);
   });
@@ -484,7 +532,9 @@ export function createApp(options: AppOptions) {
     const invoices = records.map(invoice=>invoiceLedger.withBalance(invoice,workspace)).map(({ token: _token, receiptToken: _receiptToken, ...invoice }) => invoice);
     const payments = records.flatMap(invoice=>invoiceLedger.paymentRecords(invoice,workspace));
     const mode=payments.some(payment=>payment.mode==='live')?'mixed':'simulation';
-    res.attachment('quiet-ledger-records.json').json({ schemaVersion: 1, mode,currencyBalances:summarizeInvoiceBalances(invoices),valuation:CAD_REFERENCE_VALUATION, exportedAt: now().toISOString(), verification: mode==='simulation'?'Locally generated simulation records. Not bank-authenticated or lender-accepted evidence.':'Live receiving and simulation records are labelled individually. Manual review is distinct from provider verification; no lender acceptance is implied.', invoices, payments, payouts: store.listPayouts(workspace), activity: store.audits(workspace, true) });
+    // schemaVersion 2: sanitized method rules, the full agreement (including the labelled
+    // legacy CAD reference) and each effective balance; payments stay payment-only.
+    res.attachment('quiet-ledger-records.json').json({ schemaVersion: 2, mode,currencyBalances:summarizeInvoiceBalances(invoices),valuation:CAD_REFERENCE_VALUATION, exportedAt: now().toISOString(), verification: mode==='simulation'?'Locally generated simulation records. Not bank-authenticated or lender-accepted evidence.':'Live receiving and simulation records are labelled individually. Manual review is distinct from provider verification; no lender acceptance is implied.', invoices, payments, payouts: store.listPayouts(workspace), activity: store.audits(workspace, true) });
   });
   app.get('/api/scenario', (_req, res) => {
     if ((res.locals.session as StoredSession).role !== 'owner') throw new DomainError(403, 'This scenario is available only to the private owner workspace.');

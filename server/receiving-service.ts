@@ -2,20 +2,23 @@ import {receivingRequestExpiry,receivingAdapterSupportsCurrency} from '../shared
 import {invoiceAllowsMethod} from '../shared/invoice-options.js';
 import {randomUUID,randomBytes} from 'node:crypto';
 import type {Invoice,Receipt} from '../shared/contracts.js';
-import {methodInfo,type MethodId} from '../shared/payment-methods.js';
+import type {InvoiceMethodAgreement} from '../shared/method-pricing-types.js';
+import {methodInfo,type MethodId,type PaymentMethod} from '../shared/payment-methods.js';
 import type {ReceivingAdapter,ReceivingContext,ReceivingIntent,ReceivingObservation,ReceivingRecord} from '../shared/receiving.js';
 import {Store,DomainError,hash} from './store.js';
 import {InvoiceLedger} from './invoice-ledger.js';
+import {MethodPriceAgreements} from './method-pricing.js';
 
-export interface ReceivingQuote {expectedAtomic:string;cadEquivalent:number;source:string;observedAt:string}
+export interface ReceivingQuote {expectedAtomic:string;cadEquivalent?:number;source:string;observedAt:string}
 export type QuoteReceiving=(invoice:Invoice,method:MethodId,mode:'live'|'test')=>Promise<ReceivingQuote>;
 interface Stored extends ReceivingRecord {workspace:string;context:ReceivingContext;quote:ReceivingQuote;requestedAmount?:number}
 const keyValid=(key:string|undefined)=>Boolean(key&&/^[A-Za-z0-9._:-]{1,128}$/.test(key));
+const canonicalMethod=(method:PaymentMethod)=>method==='square'?'card':method==='bank_transfer'?'bank':method;
 function safeIntent(intent:ReceivingIntent|undefined){if(!intent)return undefined;const {providerId,url,request,network,asset,instructions,cashuWalletHandoff,expiresAt}=intent;return {providerId,url,request,network,asset,instructions,...(expiresAt?{expiresAt}:{}),...(cashuWalletHandoff===true?{cashuWalletHandoff:true as const}:{})};}
 export class ReceivingService {
   private active=new Map<string,Promise<Stored>>();private cooldown=new Map<string,number>();private ledger:InvoiceLedger;
-  constructor(private store:Store,readonly adapters:ReceivingAdapter[],private quote:QuoteReceiving,private now:()=>Date,private publicOrigin?:string){
-    this.ledger=new InvoiceLedger(store);
+  constructor(private store:Store,readonly adapters:ReceivingAdapter[],private quote:QuoteReceiving,private now:()=>Date,private publicOrigin?:string,agreements?:MethodPriceAgreements){
+    this.ledger=new InvoiceLedger(store,agreements);
     if(new Set(adapters.map(a=>a.id)).size!==adapters.length)throw new Error('Receiving adapter ids must be unique.');
     store.db.exec('CREATE TABLE IF NOT EXISTS receiving_requests(id TEXT PRIMARY KEY,workspace TEXT NOT NULL,invoice_id TEXT NOT NULL REFERENCES invoices(id),token TEXT NOT NULL UNIQUE,allocation_key TEXT UNIQUE,payment_key TEXT UNIQUE,data TEXT NOT NULL)');
   }
@@ -43,18 +46,38 @@ export class ReceivingService {
     const record=this.get(id,workspace);
     const key=this.store.retryKeyForResource(`receiving:${workspace}`,id);
     if(!key)throw new DomainError(409,'The original request identity is unavailable; manual reconciliation is required.');
-    return this.create(workspace,{invoiceId:record.invoiceId,method:record.method,adapterId:record.adapterId,...(record.requestedAmount!==undefined?{amount:record.requestedAmount}:{})},key);
+    return this.create(workspace,{invoiceId:record.invoiceId,method:record.method,adapterId:record.adapterId,...(record.requestedAmount!==undefined?{amount:record.requestedAmount}:{}),...(record.agreementId!==undefined?{agreementId:record.agreementId}:{})},key);
   }
   publicRead(token:string){const row=this.store.db.prepare('SELECT id,workspace,invoice_id,data FROM receiving_requests WHERE token=?').get(this.store.tokenIndex(token));if(!row||this.store.linksRevoked(String(row.invoice_id)))throw new DomainError(404,'Receive request not found.');return this.view(this.store.decode(row.data,'receiving_requests',String(row.id),String(row.workspace)),true);}
   private async serial(id:string,operation:()=>Promise<Stored>):Promise<Stored>{
     const previous=this.active.get(id);if(previous){await previous.catch(()=>{});return this.serial(id,operation);}
     const pending=operation();this.active.set(id,pending);try{return await pending;}finally{if(this.active.get(id)===pending)this.active.delete(id);}
   }
-  async create(workspace:string,input:{invoiceId:string;method:MethodId;adapterId:string;amount?:number},key:string|undefined){
+  /**
+   * Priced invoices require the exact saved agreement before any quote, allocation or
+   * provider effect: it must belong to this invoice and workspace, and the request's
+   * canonical method must equal the locked method. Without rules, absence stays valid
+   * (the legacy branch) and a supplied agreementId is rejected.
+   */
+  private assertAgreement(workspace:string,invoice:Invoice,input:{method:MethodId;agreementId?:string}):InvoiceMethodAgreement|undefined{
+    if(!invoice.methodPricing?.length){
+      if(input.agreementId!==undefined)throw new DomainError(400,'This invoice has no method pricing.');
+      return undefined;
+    }
+    if(!input.agreementId)throw new DomainError(409,'Confirm a payment-method price before requesting this invoice.','METHOD_AGREEMENT_REQUIRED');
+    const agreement=this.ledger.agreements.forInvoice(workspace,invoice.id);
+    if(!agreement)throw new DomainError(409,'Confirm a payment-method price before requesting this invoice.','METHOD_AGREEMENT_REQUIRED');
+    if(agreement.id!==input.agreementId||canonicalMethod(input.method)!==agreement.method)throw new DomainError(409,'This payment method does not match the confirmed method price.','METHOD_AGREEMENT_MISMATCH');
+    return agreement;
+  }
+  async create(workspace:string,input:{invoiceId:string;method:MethodId;adapterId:string;amount?:number;agreementId?:string},key:string|undefined){
     if(!keyValid(key))throw new DomainError(400,'A valid Idempotency-Key header is required.');
     const adapter=this.adapter(input.adapterId);if(!adapter.methods.includes(input.method))throw new DomainError(409,'This provider does not support the selected method.');
     const invoice=this.store.getInvoice(input.invoiceId,workspace);if(!invoice)throw new DomainError(404,'Invoice not found.');if(!invoiceAllowsMethod(invoice,input.method))throw new DomainError(400,'This payment method is not accepted for this invoice.');
+    if(invoice.currency==='SAT'&&methodInfo(input.method).settlement!=='bitcoin')throw new DomainError(409,'SAT invoices support Bitcoin-native receiving methods only. No payment request was created.');
     if(!receivingAdapterSupportsCurrency(adapter,invoice.currency,input.method))throw new DomainError(409,`This provider does not support ${invoice.currency} for the selected method. Choose a supported currency or another provider.`);
+    // Bind the payer's confirmed method price before any quote or provider work.
+    const agreement=this.assertAgreement(workspace,invoice,input);
     const scope=`receiving:${workspace}`;
     const prior=this.store.db.prepare('SELECT response FROM idempotency WHERE scope=? AND key=?').get(scope,key!);
     let intent:Stored;
@@ -66,14 +89,24 @@ export class ReceivingService {
       const amount=input.amount??balance.due;
       if(!Number.isSafeInteger(amount)||amount<=0)throw new DomainError(input.amount===undefined?409:400,'A positive integer receiving amount is required.');
       if(balance.mode==='simulation'||balance.state==='void'||amount>balance.due)throw new DomainError(409,'Receiving amount exceeds the current unpaid invoice balance.');
-      let quote:ReceivingQuote;try{quote=await this.quote({...invoice,total:amount,totalCad:Number((BigInt(invoice.totalCad)*BigInt(amount)+BigInt(invoice.total)/2n)/BigInt(invoice.total)),amountSats:Number((BigInt(invoice.amountSats)*BigInt(amount)+BigInt(invoice.total)/2n)/BigInt(invoice.total))},input.method,adapter.mode);}catch{throw new DomainError(503,'A current receiving quote is unavailable. No payment request was created.');}
-      if(!/^[1-9]\d{0,20}$/.test(quote.expectedAtomic)||!Number.isSafeInteger(quote.cadEquivalent)||quote.cadEquivalent<0)throw new DomainError(503,'The receiving quote is invalid.');
+      // Installments quote the exact requested effective amount. With an agreement the
+      // legacy references prorate the agreed reference by amount/effectiveTotal; SAT
+      // binds whole satoshis exactly. Without rules the original references are kept.
+      const quoteInvoice:Invoice=agreement?
+        {...invoice,total:amount,
+          ...(agreement.referenceTotalCad!==undefined?{totalCad:Number((BigInt(agreement.referenceTotalCad)*BigInt(amount)+BigInt(agreement.effectiveTotal)/2n)/BigInt(agreement.effectiveTotal))}:{}),
+          ...(agreement.referenceAmountSats!==undefined?{amountSats:Number((BigInt(agreement.referenceAmountSats)*BigInt(amount)+BigInt(agreement.effectiveTotal)/2n)/BigInt(agreement.effectiveTotal))}:{})}:
+        invoice.currency==='SAT'?{...invoice,total:amount}:{...invoice,total:amount,totalCad:Number((BigInt(invoice.totalCad!)*BigInt(amount)+BigInt(invoice.total)/2n)/BigInt(invoice.total)),amountSats:Number((BigInt(invoice.amountSats!)*BigInt(amount)+BigInt(invoice.total)/2n)/BigInt(invoice.total))};
+      let quote:ReceivingQuote;try{quote=await this.quote(quoteInvoice,input.method,adapter.mode);}catch{throw new DomainError(503,'A current receiving quote is unavailable. No payment request was created.');}
+      if(!/^[1-9]\d{0,20}$/.test(quote.expectedAtomic)||(quote.cadEquivalent!==undefined&&(!Number.isSafeInteger(quote.cadEquivalent)||quote.cadEquivalent<0)))throw new DomainError(503,'The receiving quote is invalid.');
       intent=this.store.idempotent(scope,key,input,201,()=>{
         if(Number(this.store.db.prepare('SELECT COUNT(*) as n FROM receiving_requests WHERE invoice_id=? AND workspace=?').get(input.invoiceId,workspace)!.n)>=this.store.limits.receiveRequestsPerInvoice)throw new DomainError(429,'This invoice has reached its receiving-request limit. Reuse a saved request.');
         const currentInvoice=this.store.getInvoice(input.invoiceId,workspace);if(!currentInvoice)throw new DomainError(409,'Invoice state changed before request creation.');const currentBalance=this.ledger.balance(currentInvoice,workspace);if(currentBalance.mode==='simulation'||currentBalance.state==='void'||amount>currentBalance.due)throw new DomainError(409,'Invoice state changed before request creation.');if(!invoiceAllowsMethod(currentInvoice,input.method))throw new DomainError(400,'This payment method is not accepted for this invoice.');
+        // Recheck the agreement binding inside the insert transaction.
+        this.assertAgreement(workspace,currentInvoice,input);
         const id=randomUUID(),createdAt=this.now().toISOString(),expiresAt=new Date(this.now().getTime()+(['fiat','noncash'].includes(methodInfo(input.method).settlement)?3600000:900000)).toISOString();
         const context:ReceivingContext={requestId:id,method:input.method,amount,currency:invoice.currency,expectedAtomic:quote.expectedAtomic,idempotencyKey:randomUUID(),createdAt,expiresAt,mode:adapter.mode};
-        const record:Stored={id,token:randomBytes(32).toString('base64url'),workspace,invoiceId:invoice.id,invoiceNumber:invoice.number,method:input.method,adapterId:adapter.id,mode:adapter.mode,status:'creation_pending',amount,currency:invoice.currency,expectedAtomic:quote.expectedAtomic,createdAt,expiresAt,context,quote,...(input.amount!==undefined?{requestedAmount:input.amount}:{})};
+        const record:Stored={id,token:randomBytes(32).toString('base64url'),workspace,invoiceId:invoice.id,invoiceNumber:invoice.number,method:input.method,adapterId:adapter.id,mode:adapter.mode,status:'creation_pending',amount,currency:invoice.currency,expectedAtomic:quote.expectedAtomic,createdAt,expiresAt,context,quote,...(input.amount!==undefined?{requestedAmount:input.amount}:{}),...(agreement?{agreementId:agreement.id}:{})};
         if(this.publicOrigin)record.context.returnUrl=this.publicOrigin+'/receive/'+record.token;
         this.store.db.prepare('INSERT INTO receiving_requests(id,workspace,invoice_id,token,data) VALUES(?,?,?,?,?)').run(id,workspace,invoice.id,this.store.tokenIndex(record.token),this.store.encode(record,'receiving_requests',record.id,workspace));return record;
       }).body;
@@ -113,6 +146,12 @@ export class ReceivingService {
       const current=this.get(record.id);if(current.status==='paid')return current;
       const invoice=this.store.getInvoice(current.invoiceId,current.workspace);if(!invoice)throw new DomainError(404,'Invoice not found.');
       if(!invoiceAllowsMethod(invoice,current.method))throw new DomainError(400,'This payment method is not accepted for this invoice.');
+      // A request saved with an agreement must still match that exact agreement and
+      // method at commit; a legacy request without one keeps its frozen amount.
+      if(current.agreementId!==undefined){
+        const agreement=invoice.methodPricing?.length?this.ledger.agreements.forInvoice(current.workspace,current.invoiceId):undefined;
+        if(!agreement||agreement.id!==current.agreementId||canonicalMethod(current.method)!==agreement.method)throw new DomainError(409,'The confirmed method price no longer matches this request.','METHOD_AGREEMENT_MISMATCH');
+      }
       const identity=hash(JSON.stringify([current.intent?.asset??current.currency,current.intent?.network??'fiat',observation.paymentId]));
       const paymentKey=this.store.indexValue('payment',hash(JSON.stringify([current.workspace,current.mode,identity])));
       // Older keys included a connection alias. Read their verified invoice provenance too.
@@ -129,7 +168,8 @@ export class ReceivingService {
         const legacyReceipt=this.store.db.prepare('SELECT 1 FROM receipts WHERE invoice_id=?').get(invoice.id);
         // The legacy receipt derives its CAD valuation from this original invoice.
         // Keep that snapshot intact; each later payment has its own ledger receipt.
-        this.store.saveInvoice({...invoice,status:balance.state==='paid'?'paid':'open',settlementMode:'live',...(legacyReceipt?{}:{...(balance.state==='paid'?{paidAt:verifiedAt,totalCad:receivedCad}:{}),paymentMethod:current.method,receiptToken,nativePayment})});
+        // SAT invoices keep no CAD reference: their totalCad stays absent.
+        this.store.saveInvoice({...invoice,status:balance.state==='paid'?'paid':'open',settlementMode:'live',...(legacyReceipt?{}:{...(balance.state==='paid'&&invoice.currency!=='SAT'?{paidAt:verifiedAt,totalCad:receivedCad}:{}),...(balance.state==='paid'&&invoice.currency==='SAT'?{paidAt:verifiedAt}:{}),paymentMethod:current.method,receiptToken,nativePayment})});
         this.store.audit(current.workspace,'payment.live_received',`${invoice.number}: live ${current.method} receipt recorded (${verification} verification).`,verifiedAt);
       }
       return current;

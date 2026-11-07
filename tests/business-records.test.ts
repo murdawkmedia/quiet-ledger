@@ -77,7 +77,7 @@ test('application mount retains same-origin, CSRF and browser-only API boundarie
  try{
   const user=request.agent(app),login=await user.post('/api/session/owner').send({token:ownerToken}).expect(200),csrf=login.body.csrfToken;
   const invoice=(await user.post('/api/invoices').set('X-CSRF-Token',csrf).set('Idempotency-Key',randomUUID()).send(input).expect(201)).body;
-  for(const [path,body] of [['statement',{invoiceIds:[invoice.id]}],['csv-preview',{csv:invoiceBalanceCsv([{invoice,balance:{total:1000,paid:0,credited:0,due:1000,overpaid:0,currency:'CAD',state:'unpaid',mode:'live'},entries:[]}])}]] as const){
+  for(const [path,body] of [['statement',{invoiceIds:[invoice.id]}],['csv-preview',{csv:invoiceBalanceCsv([{invoice,balance:{total:1000,effectiveTotal:1000,paid:0,credited:0,due:1000,overpaid:0,currency:'CAD',state:'unpaid',mode:'live'},entries:[]}])}]] as const){
    await request(app).post('/api/business-records/'+path).send(body).expect(401);await user.post('/api/business-records/'+path).send(body).expect(403);
    await user.post('/api/business-records/'+path).set('X-CSRF-Token',csrf).set('Origin','https://fictional-untrusted.invalid').send(body).expect(403);
    await request(app).post('/api/v1/business-records/'+path).set('Authorization','Bearer '+apiToken).send(body).expect(403);

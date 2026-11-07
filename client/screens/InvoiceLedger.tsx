@@ -1,17 +1,18 @@
 import {useEffect,useRef,useState} from 'react';
 import {ArrowLeft,ArrowUpRight,CheckCircle2,RefreshCw} from 'lucide-react';
 import type {InvoiceLedgerView} from '../../shared/invoice-ledger';
-import {invoiceAllowsMethod,parseInvoiceAmount,currencyScale} from '../../shared/invoice-options';
+import {invoiceAllowsMethod,currencyAllowsMethod,parseInvoiceAmount,currencyScale} from '../../shared/invoice-options';
 import {METHOD_DEFINITIONS,type MethodId} from '../../shared/payment-methods';
 import {receivingAdapterSupportsCurrency} from '../../shared/receiving';
 import {actionKey,api,ApiError,date,methodLabel,money,post} from '../api';
 import {Badge,CopyButton,ErrorMessage,Link,Loading,PageHeading,PrivacyNote,SectionCard} from '../components';
 import type {AdapterView,ReceiveRequest} from './Receiving';
+import '../method-pricing.css';
 
 type ReceivingView={adapters:AdapterView[];requests:ReceiveRequest[];nextCursor?:string|null};
 type PendingAction={kind:'receiving'|'credit'|'void';path:string;body:Record<string,unknown>;key:string};
 const stateLabels={unpaid:'Unpaid',partially_paid:'Partially paid',paid:'Paid',credited:'Credited',void:'Void'};
-const amountText=(amount:number,currency:string)=>(amount/currencyScale(currency)).toFixed(currency==='KRW'?0:2);
+const amountText=(amount:number,currency:string)=>(amount/currencyScale(currency)).toFixed(currencyScale(currency)===1?0:2);
 
 export function InvoiceLedger({id,onChanged}:{id:string;onChanged:()=>Promise<void>}){
   const [view,setView]=useState<InvoiceLedgerView|null>(null),[receiving,setReceiving]=useState<ReceivingView>({adapters:[],requests:[]});
@@ -40,18 +41,18 @@ export function InvoiceLedger({id,onChanged}:{id:string;onChanged:()=>Promise<vo
     }else setError(result[0].reason.message);
     if(result[1].status==='fulfilled'){
       const next=result[1].value;setReceiving(next);setReceivingError('');
-      if(initial&&result[0].status==='fulfilled'){
-        const invoice=result[0].value.invoice;
-        const adapter=next.adapters.find(row=>row.mode==='live'&&row.configured!==false&&row.methods.some(value=>invoiceAllowsMethod(invoice,value as MethodId)&&receivingAdapterSupportsCurrency(row,invoice.currency,value)));
-        const selected=adapter?.methods.find(value=>invoiceAllowsMethod(invoice,value as MethodId)&&receivingAdapterSupportsCurrency(adapter,invoice.currency,value));
-        setMethod(selected??'');setAdapterId(adapter?.id??'');
+      if(result[0].status==='fulfilled'){
+        const invoice=result[0].value.invoice,agreement=invoice.priceAgreement;
+        const adapter=next.adapters.find(row=>row.mode==='live'&&row.configured!==false&&row.methods.some(value=>(!agreement||agreement.method===value)&&invoiceAllowsMethod(invoice,value as MethodId)&&currencyAllowsMethod(invoice.currency,value as MethodId)&&receivingAdapterSupportsCurrency(row,invoice.currency,value)));
+        const selected=agreement?.method??adapter?.methods.find(value=>invoiceAllowsMethod(invoice,value as MethodId)&&currencyAllowsMethod(invoice.currency,value as MethodId)&&receivingAdapterSupportsCurrency(adapter,invoice.currency,value));
+        if(initial||agreement){setMethod(selected??'');setAdapterId(adapter?.id??'');}
       }
     }else setReceivingError('Payment requests could not be refreshed. Retry before creating a request.');
     setRefreshing(false);
   }
   useEffect(()=>{void load(true);return()=>{epoch.current++;loadSequence.current++;};},[id]);
-  const invoice=view?.invoice,balance=view?.balance;
-  const eligible=receiving.adapters.filter(row=>row.mode==='live'&&row.configured!==false).map(row=>({...row,methods:row.methods.filter(value=>invoice&&invoiceAllowsMethod(invoice,value as MethodId)&&receivingAdapterSupportsCurrency(row,invoice.currency,value))})).filter(row=>row.methods.length);
+  const invoice=view?.invoice,balance=view?.balance,agreement=invoice?.priceAgreement,agreementPending=Boolean(invoice?.methodPricing?.length&&!agreement);
+  const eligible=receiving.adapters.filter(row=>row.mode==='live'&&row.configured!==false).map(row=>({...row,methods:row.methods.filter(value=>invoice&&(!agreement||agreement.method===value)&&invoiceAllowsMethod(invoice,value as MethodId)&&currencyAllowsMethod(invoice.currency,value as MethodId)&&receivingAdapterSupportsCurrency(row,invoice.currency,value))})).filter(row=>row.methods.length);
   const choices=eligible.filter(row=>row.methods.includes(method)),outstanding=receiving.requests.some(row=>row.invoiceId===id&&row.mode==='live'&&row.status!=='paid');
   const locked=busy||refreshing||Boolean(pending),collectable=Boolean(balance&&balance.due>0&&!['void','credited'].includes(balance.state));
   function positiveAmount(text:string){
@@ -83,8 +84,8 @@ export function InvoiceLedger({id,onChanged}:{id:string;onChanged:()=>Promise<vo
     }finally{if(current===epoch.current){setBusy(false);inFlight.current=false;}}
   }
   function create(event:React.FormEvent){
-    event.preventDefault();if(locked||!collectable)return;
-    try{const value=positiveAmount(amount);if(!method||!choices.some(row=>row.id===adapterId))throw new Error('Choose a configured payment method and connection.');void submit({kind:'receiving',path:'/api/receiving',body:{invoiceId:id,amount:value,method,adapterId},key:actionKey()});}catch(e){setError((e as Error).message);}
+    event.preventDefault();if(locked||!collectable||agreementPending)return;
+    try{const value=positiveAmount(amount);if(!method||(agreement&&method!==agreement.method)||!choices.some(row=>row.id===adapterId))throw new Error('Choose a configured payment method and connection.');void submit({kind:'receiving',path:'/api/receiving',body:{invoiceId:id,amount:value,method,adapterId,...(agreement?{agreementId:agreement.id}:{})},key:actionKey()});}catch(e){setError((e as Error).message);}
   }
   function credit(event:React.FormEvent){
     event.preventDefault();if(locked||!collectable)return;
@@ -105,23 +106,26 @@ export function InvoiceLedger({id,onChanged}:{id:string;onChanged:()=>Promise<vo
     {pending&&!busy?<div className="review-message" role="status"><strong>The last response is uncertain.</strong><p>The saved amount and details are fixed until the same request returns a result. The current balance is shown below.</p><button className="button secondary" disabled={refreshing} onClick={()=>void submit(pending)}>Retry saved {pending.kind==='receiving'?'payment request':pending.kind==='credit'?'credit note':'void'}</button></div>:null}
     <dl className="ledger-balances" aria-label="Invoice balance">
       {([['total','Original total'],['paid','Paid'],['credited','Credits'],['due','Amount due'],['overpaid','Overpaid']] as const).map(([key,label])=><div key={key} className={key==='due'?'ledger-balance-due':''}><dt>{label}</dt><dd data-testid={`ledger-${key}`}>{money(balance![key],balance!.currency)}</dd></div>)}
+      {invoice!.methodPricing?.length?<div><dt>Effective method price</dt><dd data-testid="ledger-effectiveTotal">{money(balance!.effectiveTotal??balance!.total,balance!.currency)}</dd></div>:null}
     </dl>
+    {agreementPending?<section className="method-price-agreement"><h2>Payer method price confirmation required</h2><p>The payer must choose and confirm an exact server offer on public checkout before receiving, reporting, simulation or credit. Original issued totals remain unchanged.</p><Link to={`/pay/${invoice!.token}`} className="text-link">Open customer checkout to confirm price<ArrowUpRight size={15}/></Link></section>:null}
+    {agreement?<section className="method-price-agreement"><h2>Method price agreement</h2><p><strong>{methodLabel(agreement.method)} price locked</strong></p><p>Agreement {agreement.id} · Confirmed {date(agreement.confirmedAt)} · No payment or credit was created by confirmation.</p><dl className="method-agreement-facts"><div><dt>Original issued total</dt><dd>{money(agreement.issuedTotal,agreement.currency)}</dd></div><div><dt>Method discount</dt><dd>−{money(agreement.discountAmount,agreement.currency)}</dd></div><div><dt>Method premium</dt><dd>+{money(agreement.premiumAmount,agreement.currency)}</dd></div><div><dt>Original tax</dt><dd>{money(agreement.issuedTax,agreement.currency)}</dd></div><div><dt>Effective tax</dt><dd>{money(agreement.effectiveTax,agreement.currency)}</dd></div><div><dt>Effective method total</dt><dd>{money(agreement.effectiveTotal,agreement.currency)}</dd></div></dl></section>:null}
     {balance!.overpaid>0?<p className="review-message">The recorded value exceeds the invoice total. Review the individual payments and credits before arranging any refund.</p>:null}
     <SectionCard title="Ledger entries" description="Payments, credits and voids remain separate in this permanent record.">
       {view.entries.length?<div className="table-scroll"><table className="data-table ledger-entries"><thead><tr><th>Entry</th><th>Recorded</th><th className="numeric">Amount</th><th>Details</th></tr></thead><tbody>{view.entries.map(entry=><tr key={entry.id}><td><strong>{entry.kind==='payment'?'Payment':entry.kind==='credit'?'Credit note':'Void'}</strong></td><td>{date(entry.createdAt)}</td><td className="numeric">{money(entry.amount,entry.currency)}</td><td>{entry.reason?<p>{entry.reason}</p>:null}{entry.method?<span>{methodLabel(entry.method)}{entry.verification?` · ${entry.verification==='provider'?'Provider verified':'Owner verified'}`:''}</span>:null}{entry.kind==='payment'&&entry.receiptToken?<Link to={`/receipt/${entry.receiptToken}`} className="text-link">Receipt {entry.receiptNumber??entry.id}<ArrowUpRight size={14}/></Link>:null}</td></tr>)}</tbody></table></div>:<p className="ledger-empty">No payments or adjustments recorded.</p>}
     </SectionCard>
     <SectionCard title="Payment requests" description="Each request keeps its original amount and quote. Opening a request does not record a payment.">
       {receivingError?<ErrorMessage message={receivingError}/>:null}
-      {collectable?<form className="ledger-form" onSubmit={create}>
-        <label className="field">Payment request amount ({balance!.currency})<input inputMode={balance!.currency==='KRW'?'numeric':'decimal'} required value={amount} disabled={locked} onChange={event=>setAmount(event.target.value)}/></label>
-        <label className="field">Receiving method<select value={method} disabled={locked} required onChange={event=>{setMethod(event.target.value);setAdapterId(eligible.find(row=>row.methods.includes(event.target.value))?.id??'');}}>{!method?<option value="">Choose a method</option>:null}{METHOD_DEFINITIONS.filter(row=>eligible.some(adapter=>adapter.methods.includes(row.id))).map(row=><option key={row.id} value={row.id}>{row.label}</option>)}</select></label>
+      {agreementPending?<p className="method-price-pending">Waiting for the payer’s public method-price confirmation. The owner cannot select or override that price.</p>:collectable?<form className="ledger-form" onSubmit={create}>
+        <label className="field">Payment request amount ({balance!.currency})<input inputMode={currencyScale(balance!.currency)===1?'numeric':'decimal'} required value={amount} disabled={locked} onChange={event=>setAmount(event.target.value)}/></label>
+        <label className="field">Receiving method<select aria-label="Receiving method" value={method} disabled={locked||Boolean(agreement)} required onChange={event=>{setMethod(event.target.value);setAdapterId(eligible.find(row=>row.methods.includes(event.target.value))?.id??'');}}>{!method?<option value="">Choose a method</option>:null}{METHOD_DEFINITIONS.filter(row=>eligible.some(adapter=>adapter.methods.includes(row.id))).map(row=><option key={row.id} value={row.id}>{row.label}</option>)}</select></label>
         <label className="field">Payment connection<select value={adapterId} disabled={locked} required onChange={event=>setAdapterId(event.target.value)}>{!adapterId?<option value="">Choose a connection</option>:null}{choices.map(row=><option key={row.id} value={row.id}>{row.label??row.id}</option>)}</select></label>
         <button className="button primary" disabled={locked||!method||!choices.some(row=>row.id===adapterId)||Boolean(receivingError)}>Create payment request</button>
         {!eligible.length?<p>No configured live connection supports this invoice’s currency and accepted methods. <Link to="/payment-methods" className="text-link">Review payment methods</Link></p>:null}
       </form>:null}
       <div className="ledger-request-list">{receiving.requests.filter(row=>row.invoiceId===id).map(row=><article key={row.id}><div><strong>{money(row.amount,row.currency)} {row.currency}</strong><p>{methodLabel(row.method)} · {row.mode==='live'?'Live':'Test'} · {row.status==='paid'?'Verified':row.status==='creation_pending'?'Creation needs recovery':row.reviewReason?'Owner review required':'Awaiting payment'}</p></div><div className="row-actions"><Link to={`/receive/${row.token}`} className="text-link">Open payment request<ArrowUpRight size={14}/></Link><CopyButton value={`${location.origin}/receive/${row.token}`} label="Copy receiving page"/></div></article>)}</div>
     </SectionCard>
-    {collectable?<div className="ledger-adjustments"><SectionCard title="Credit note" description="Reduce the amount due with a recorded reason. A credit creates no payment or receipt."><form onSubmit={credit}><label className="field">Credit amount ({balance!.currency})<input required inputMode={balance!.currency==='KRW'?'numeric':'decimal'} value={creditAmount} disabled={locked} onChange={event=>setCreditAmount(event.target.value)}/></label><label className="field">Credit reason<textarea required maxLength={1000} value={creditReason} disabled={locked} onChange={event=>setCreditReason(event.target.value)}/></label><button className="button secondary" disabled={locked}>Record credit note</button></form></SectionCard>
+    {collectable?<div className="ledger-adjustments">{!agreementPending?<SectionCard title="Credit note" description="Reduce the amount due with a recorded reason. A credit creates no payment or receipt."><form onSubmit={credit}><label className="field">Credit amount ({balance!.currency})<input required inputMode={currencyScale(balance!.currency)===1?'numeric':'decimal'} value={creditAmount} disabled={locked} onChange={event=>setCreditAmount(event.target.value)}/></label><label className="field">Credit reason<textarea required maxLength={1000} value={creditReason} disabled={locked} onChange={event=>setCreditReason(event.target.value)}/></label><button className="button secondary" disabled={locked}>Record credit note</button></form></SectionCard>:null}
       {balance!.paid===0?<SectionCard title="Void unpaid invoice" description="Retire an unpaid invoice while keeping its original amount and history."><form onSubmit={voidInvoice}>{outstanding?<p className="review-message">Existing external payment requests cannot be cancelled by voiding this invoice.</p>:null}<label className="field">Void reason<textarea required maxLength={1000} value={voidReason} disabled={locked} onChange={event=>setVoidReason(event.target.value)}/></label><label className="ledger-confirm"><input type="checkbox" checked={voidConfirmed} disabled={locked} onChange={event=>setVoidConfirmed(event.target.checked)}/><span>I confirm this unpaid invoice should be voided.</span></label><button className="button secondary" disabled={locked||outstanding||Boolean(receivingError)||!voidConfirmed||!voidReason.trim()}>Void unpaid invoice</button></form></SectionCard>:null}
     </div>:null}
     <PrivacyNote>The issued invoice total stays unchanged. Payment receipts record verified payments; credits and voids cannot establish a transfer of funds.</PrivacyNote>

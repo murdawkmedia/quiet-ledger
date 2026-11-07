@@ -6,7 +6,7 @@ import {createHash} from 'node:crypto';
 const root=process.cwd(),output=resolve(root,'dist/hosted');
 // Generated output only; this path is owned by this build script.
 await rm(output,{recursive:true,force:true});await mkdir(output,{recursive:true});
-await build({entryPoints:{'server/index':'server/index.ts','ops/backup':'ops/backup.ts','ops/demo-state-backup':'ops/demo-state-backup.ts'},outdir:output,bundle:true,platform:'node',target:'node26',format:'esm',packages:'external',sourcemap:false,logLevel:'warning'});
+await build({entryPoints:{'server/index':'server/index.ts','ops/backup':'ops/backup.ts','ops/demo-state-backup':'ops/demo-state-backup.ts','ops/cashu-recovery':'ops/cashu-recovery.mjs'},outdir:output,bundle:true,platform:'node',target:'node26',format:'esm',packages:'external',sourcemap:false,logLevel:'warning'});
 await cp('dist/client',resolve(output,'public'),{recursive:true});
 await build({entryPoints:['ops/pages-entry.ts'],outfile:resolve(output,'public/_worker.js'),bundle:true,platform:'browser',target:'es2023',format:'esm',sourcemap:false,minify:true,logLevel:'warning'});
 await writeFile(resolve(output,'public/_routes.json'),JSON.stringify({version:1,include:['/*'],exclude:[]})+'\n');
@@ -34,7 +34,7 @@ async function dependencyNotices(directory){
   const manifest=JSON.parse(await readFile(resolve(directory,'package.json'),'utf8'));
   const identity=manifest.name+'@'+manifest.version;
   if(visited.has(identity))return;visited.add(identity);
-  for(const file of ['LICENSE','LICENSE.md','LICENSE.txt','LICENSE-MIT','COPYING','NOTICE','NOTICE.txt']){
+  for(const file of ['LICENSE','LICENSE.md','LICENSE.txt','LICENSE-MIT','LICENSE-APACHE','COPYING','NOTICE','NOTICE.txt']){
     try{notices.push('--- '+identity+' / '+file+' ---\n'+await readFile(resolve(directory,file),'utf8'));}catch(error){if(error.code!=='ENOENT')throw error;}
   }
   for(const name of Object.keys(manifest.dependencies??{})){
@@ -48,6 +48,9 @@ async function dependencyNotices(directory){
   }
 }
 await dependencyNotices(resolve(root,'node_modules/@internet-privacy/marmot-ts'));
+// The pinned Cashu recovery SDK and its exact transitive dependency tree. This
+// walks nested installs too, so the MIT/Apache notices are never inferred.
+await dependencyNotices(resolve(root,'node_modules/@cashu/cashu-ts'));
 await writeFile(resolve(output,'public/THIRD-PARTY-LICENSES.txt'),notices.join('\n\n'));
 
 for(const file of ['package.json','package-lock.json'])await copyFile(file,resolve(output,file));

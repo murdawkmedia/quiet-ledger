@@ -103,7 +103,7 @@ function contextBinding(context:ReceivingContext,conn:ReturnType<typeof connecti
   minorAmount(context.amount);
   const atomic=context.expectedAtomic;
   const created=Date.parse(context.createdAt),expires=Date.parse(context.expiresAt),now=conn.now().getTime();
-  if(context.method!=='ark'||context.mode!==conn.mode||!['CAD','USD','EUR','GBP','KRW'].includes(context.currency)||typeof context.requestId!=='string'||!/^[A-Za-z0-9_-]{1,192}$/.test(context.requestId)||typeof context.idempotencyKey!=='string'||context.idempotencyKey.length<1||context.idempotencyKey.length>192||typeof atomic!=='string'||!/^[1-9]\d{0,15}$/.test(atomic)||BigInt(atomic)>BigInt(MAX_SATS)||!Number.isFinite(created)||!Number.isFinite(expires)||!Number.isFinite(now)||created>now+60_000||expires<=created||now>=expires)throw new Error('Invalid, expired or mismatched Bark receive context.');
+  if(context.method!=='ark'||context.mode!==conn.mode||!['CAD','USD','EUR','GBP','KRW','SAT'].includes(context.currency)||typeof context.requestId!=='string'||!/^[A-Za-z0-9_-]{1,192}$/.test(context.requestId)||typeof context.idempotencyKey!=='string'||context.idempotencyKey.length<1||context.idempotencyKey.length>192||typeof atomic!=='string'||!/^[1-9]\d{0,15}$/.test(atomic)||BigInt(atomic)>BigInt(MAX_SATS)||!Number.isFinite(created)||!Number.isFinite(expires)||!Number.isFinite(now)||created>now+60_000||expires<=created||now>=expires)throw new Error('Invalid, expired or mismatched Bark receive context.');
   return digest(JSON.stringify([context.requestId,context.method,context.amount,context.currency,atomic,context.idempotencyKey,context.createdAt,context.expiresAt,context.mode]));
 }
 function validateVtxos(value:unknown,expectedServer:string){

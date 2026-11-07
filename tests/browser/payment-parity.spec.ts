@@ -33,7 +33,7 @@ test('manual report waits for owner review and has no paid receipt',async({page}
 });
 test('configured live checkout creates request and renders verified live receipt accurately',async({page},info)=>{
   await page.route('**/api/checkout/fictional-invoice-token',route=>route.fulfill({json:{invoice,payment:{mode:'simulation',amountSats:12000,request:'simulation:fixture'},adapters:[adapter]}}));
-  await page.route('**/api/checkout/fictional-invoice-token/receiving',async route=>{expect(route.request().postDataJSON()).toEqual({method:'bitcoin',adapterId:adapter.id});await route.fulfill({json:{request:receive}});});
+  await page.route('**/api/checkout/fictional-invoice-token/receiving',async route=>{expect(route.request().postDataJSON()).toEqual({method:'bitcoin',adapterId:adapter.id,amount:1200});await route.fulfill({json:{request:receive}});});
   await page.route('**/api/receive/fictional-receive-token',route=>route.fulfill({json:{request:receive}}));
   await page.route('**/api/receive/fictional-receive-token/check',route=>route.fulfill({json:{request:{...receive,status:'paid',receipt:{number:'FICTIONAL-LIVE-RECEIPT',mode:'live',method:'bitcoin',amount:1200,currency:'CAD',verifiedAt:invoice.createdAt}}}}));
   await page.goto('/pay/fictional-invoice-token');await page.getByRole('button',{name:'Continue with live payment',exact:true}).click();

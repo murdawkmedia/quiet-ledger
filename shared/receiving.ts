@@ -1,5 +1,5 @@
 import type {MethodId} from './payment-methods.js';
-export type AdapterCurrency='CAD'|'USD'|'EUR'|'GBP'|'KRW';
+export type AdapterCurrency='CAD'|'USD'|'EUR'|'GBP'|'KRW'|'SAT';
 export interface ReceivingContext {
   requestId:string;method:MethodId;amount:number;currency:AdapterCurrency;
   expectedAtomic:string;idempotencyKey:string;createdAt:string;expiresAt:string;
@@ -34,6 +34,7 @@ export interface ReceivingAdapter {
   recover?(context:ReceivingContext):Promise<ReceivingIntent>;
 }
 export interface ReceivingRecord {
+  agreementId?:string;
   id:string;token:string;invoiceId:string;invoiceNumber:string;method:MethodId;adapterId:string;
   mode:'live'|'test';status:'creation_pending'|'awaiting_payment'|'paid';
   amount:number;currency:AdapterCurrency;expectedAtomic:string;createdAt:string;expiresAt:string;

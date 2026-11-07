@@ -216,6 +216,13 @@ test('MCP invoice tools preserve KRW dates adjustments and allowed methods witho
  try{const result=await p.client.callTool({name:'create_invoice',arguments:{...args,idempotencyKey:'fictional_marmot_krw'}});assert.notEqual(result.isError,true);assert.deepEqual(sent,args);const saved=(result.structuredContent as any).invoice;for(const field of ['issueDate','dueDate','paymentTermDays','paymentTerms','discountBps','premiumBps','acceptedMethods'])assert.deepEqual(saved[field],(args as any)[field]);assert.equal(saved.discountAmount,7500);assert.equal(saved.premiumAmount,1500);assert.equal(saved.token,undefined);}finally{await p.close();}
 });
 
+test('MCP create_invoice preserves SAT whole-satoshi denomination without a fiat reference',async()=>{
+ let sent:Record<string,unknown>|undefined;
+ const args={customerName:'Fictional satoshi client',title:'Whole-satoshi workshop',currency:'SAT',items:[{description:'Recording',quantity:2,unitAmount:10500}]};
+ const api=new LedgerApiClient({token,fetcher:async(_input,init)=>{sent=JSON.parse(String(init?.body));return Response.json({...invoice,...sent,total:21000,amountSats:21000});}}),p=await protocol(api);
+ try{const result=await p.client.callTool({name:'create_invoice',arguments:{...args,idempotencyKey:'fictional_sats_whole'}});assert.notEqual(result.isError,true);assert.deepEqual(sent,args);const saved=(result.structuredContent as any).invoice;assert.equal(saved.currency,'SAT');assert.equal(saved.total,21000);assert.equal(saved.totalCad,undefined);assert.equal(saved.token,undefined);assert.equal(saved.receiptToken,undefined);}finally{await p.close();}
+});
+
 test('business ledger API requires explicit read, invoice-write and bulk-record scopes',async()=>{
  const auth=`Bearer ${token}`;
  await request(authApp(['invoices:read'])).get('/api/v1/invoices/inv_1/ledger').set('Authorization',auth).expect(200);
@@ -256,4 +263,60 @@ test('MCP preserves explicit line kinds and adjustment eligibility',async()=>{
  const args={customerName:'Fictional travel client',title:'Labour and fixed flights',currency:'CAD',items:[{description:'Fictional labour',quantity:1,unitAmount:200000,kind:'service',adjustmentEligible:true},{description:'Fictional fixed flights',quantity:1,unitAmount:80000,kind:'expense',adjustmentEligible:false}],discountBps:500,acceptedMethods:['bitcoin','lightning']};
  const p=await protocol(new LedgerApiClient({token,fetcher:async(_input,init)=>{sent=JSON.parse(String(init?.body));return Response.json({...invoice,...sent,total:270000});}}));
  try{const result=await p.client.callTool({name:'create_invoice',arguments:{...args,idempotencyKey:'fictional-line-eligibility'}});assert.notEqual(result.isError,true);assert.deepEqual(sent,args);assert.deepEqual((result.structuredContent as any).invoice.items,args.items);assert.equal((result.structuredContent as any).invoice.token,undefined);}finally{await p.close();}
+});
+
+test('MCP create_invoice forwards method pricing and rejects invalid rules before HTTP',async()=>{
+  let count=0,sent:Record<string,unknown>|undefined;
+  const p=await protocol(new LedgerApiClient({token,fetcher:async(_input,init)=>{count++;sent=JSON.parse(String(init?.body));return Response.json({...invoice,...sent});}}));
+  try{
+    const args={customerName:'Fictional pricing client',title:'Method-priced workshop',currency:'CAD',items:[{description:'Fictional labour',quantity:1,unitAmount:200000},{description:'Fictional flights',quantity:1,unitAmount:80000,kind:'expense'}],discountBps:500,taxBps:500,methodPricing:[{method:'lightning',discountBps:1000},{method:'card',premiumBps:200}]};
+    const result=await p.client.callTool({name:'create_invoice',arguments:{...args,idempotencyKey:'fictional_method_pricing'}});
+    assert.notEqual(result.isError,true);assert.deepEqual(sent,args);
+    // Client-facing aliases, unknown methods, zero-rate, duplicate and excess rules are rejected before HTTP.
+    const canonical=['bitcoin','liquid','lightning','bank','card','cash','check','gift_card','coupon','apple_pay','google_pay','cash_app_pay','interac','ach','sepa','wire','venmo','paypal','revolut_pay','no_charge','cashu','onchain','ark','bolt12','lnurl','xpub','taproot'];
+    const invalid:[string,unknown][]=[['square',[{method:'square',discountBps:500}]],['bank_transfer',[{method:'bank_transfer',discountBps:500}]],['ecash',[{method:'ecash',discountBps:500}]],['zero-rate',[{method:'lightning'}]],['duplicate-method',[{method:'lightning',discountBps:500},{method:'lightning',premiumBps:500}]],['too-many-rules',canonical.map(method=>({method,discountBps:100}))]];
+    for(const [name,rules] of invalid){
+      const rejected=await p.client.callTool({name:'create_invoice',arguments:{...args,idempotencyKey:`rejected-${name}`,methodPricing:rules}});
+      assert.equal(rejected.isError,true,name);
+    }
+    assert.equal(count,1);
+  }finally{await p.close();}
+});
+
+test('MCP create_receive_request forwards the exact agreement id and rejects malformed ones',async()=>{
+  let body:any,count=0;const agreementId='0d9a5b4e-1111-4222-8333-444455556666';
+  const p=await protocol(new LedgerApiClient({token,fetcher:async(_url,init)=>{count++;body=JSON.parse(String(init?.body));return Response.json({request:{...receive,agreementId}});}}));
+  try{
+    const args={invoiceId:'inv_1',method:'lightning',adapterId:'watch',agreementId,idempotencyKey:'fictional_priced_receiving'};
+    const result=await p.client.callTool({name:'create_receive_request',arguments:args});
+    assert.notEqual(result.isError,true);assert.deepEqual(body,{invoiceId:'inv_1',method:'lightning',adapterId:'watch',agreementId});
+    assert.equal((result.structuredContent as any).request.agreementId,agreementId);
+    // A malformed agreement id never reaches HTTP.
+    assert.equal((await p.client.callTool({name:'create_receive_request',arguments:{...args,agreementId:'not-a-uuid'}})).isError,true);
+    assert.equal(count,1);
+  }finally{await p.close();}
+});
+
+test('MCP invoice tools pass the confirmed price agreement and effective balance through',async()=>{
+  const methodPricing=[{method:'lightning',discountBps:1000}];
+  const priceAgreement={id:'0d9a5b4e-1111-4222-8333-444455556666',invoiceId:'inv_1',method:'lightning',offerHash:'a'.repeat(64),confirmedAt:'2026-11-06T12:00:00Z',confirmation:'public_checkout_token',currency:'CAD',eligibleSubtotal:200000,issuedSubtotal:280000,issuedDiscountAmount:10000,issuedPremiumAmount:0,issuedTax:13500,issuedTotal:283500,discountBps:1000,premiumBps:0,discountAmount:20000,premiumAmount:0,adjustedSubtotal:260000,effectiveTax:12500,taxAdjustment:-1000,effectiveTotal:262500,totalAdjustment:-21000,referenceTotalCad:262500,referenceAmountSats:2625000};
+  const balance={total:283500,effectiveTotal:262500,paid:0,credited:0,due:262500,overpaid:0,currency:'CAD',state:'unpaid',mode:'simulation'};
+  const priced={...invoice,methodPricing,priceAgreement,balance};
+  const p=await protocol(new LedgerApiClient({token,fetcher:async input=>{
+    const route=new URL(String(input)).pathname.replace('/api/v1','');
+    return Response.json(route==='/invoices/inv_1/ledger'?{invoice:priced,balance,entries:[{id:'entry_1',kind:'payment',amount:300,currency:'CAD',createdAt:'2026-11-06T00:00:00Z',method:'lightning',verification:'provider'}]}:priced);
+  }}));
+  try{
+    const single=await p.client.callTool({name:'get_invoice',arguments:{invoiceId:'inv_1'}});
+    assert.notEqual(single.isError,true);
+    const saved=(single.structuredContent as any).invoice;
+    assert.deepEqual(saved.methodPricing,methodPricing);
+    assert.deepEqual(saved.priceAgreement,priceAgreement);
+    assert.equal(saved.priceAgreement.effectiveTotal,262500);
+    assert.equal(saved.token,undefined);assert.equal(saved.receiptToken,undefined);
+    const ledger=await p.client.callTool({name:'get_invoice_ledger',arguments:{invoiceId:'inv_1'}});
+    assert.notEqual(ledger.isError,true);
+    assert.deepEqual((ledger.structuredContent as any).balance,balance);
+    assert.deepEqual((ledger.structuredContent as any).invoice.priceAgreement,priceAgreement);
+  }finally{await p.close();}
 });

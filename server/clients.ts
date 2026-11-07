@@ -29,7 +29,7 @@ const inputSchema=z.object({
   email,
   marmotPubkey,
   billingAddress:optionalText(1000),
-  currency:z.enum(['CAD','USD','EUR','GBP','KRW']).default('CAD'),
+  currency:z.enum(['CAD','USD','EUR','GBP','KRW','SAT']).default('CAD'),
   notes:optionalText(2000),
 }).strict();
 

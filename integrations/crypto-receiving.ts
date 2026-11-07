@@ -1,5 +1,6 @@
 import {createHash,createHmac} from 'node:crypto';
 import type {MethodId} from '../shared/payment-methods.js';
+import {methodInfo} from '../shared/payment-methods.js';
 import type {ReceivingAdapter,ReceivingContext,ReceivingIntent,ReceivingObservation} from '../shared/receiving.js';
 import {bounded,minorAmount,type HttpFetch} from './http.js';
 
@@ -38,7 +39,7 @@ function validateContext(context:ReceivingContext,method:MethodId,mode:'live'|'t
   bounded(context.requestId,'receive request',192);bounded(context.idempotencyKey,'retry key',192);minorAmount(context.amount);nativeAtomic(context.expectedAtomic);
   if(context.method!==method)throw new Error('Receiving method does not match this adapter.');
   if(context.mode!==mode)throw new Error('Receiving mode does not match this adapter.');
-  if(!['CAD','USD','EUR','GBP','KRW'].includes(context.currency))throw new Error('Invalid invoice currency.');
+  if(!['CAD','USD','EUR','GBP','KRW',...(methodInfo(method).settlement==='bitcoin'?['SAT' as const]:[])].includes(context.currency))throw new Error('Invalid invoice currency.');
   const start=Date.parse(context.createdAt),end=Date.parse(context.expiresAt);
   if(!Number.isFinite(start)||!Number.isFinite(end)||end<=start||end-start>7*86400_000)throw new Error('Invalid receiving time window.');
 }

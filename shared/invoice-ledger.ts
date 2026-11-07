@@ -1,7 +1,9 @@
 import type {Currency,Invoice,PaymentMethod} from './contracts.js';
 
 export interface InvoiceBalance {
- total:number;paid:number;credited:number;due:number;overpaid:number;currency:Currency;
+ total:number;/** Original issued total; kept unchanged for compatibility. */
+ /** Authoritative settlement target: original total without an agreement, agreed effective total with one. */
+ effectiveTotal:number;paid:number;credited:number;due:number;overpaid:number;currency:Currency;
  state:'unpaid'|'partially_paid'|'paid'|'credited'|'void';mode:'live'|'simulation';
 }
 export interface InvoiceLedgerEntry {

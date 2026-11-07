@@ -1,7 +1,9 @@
-export type Currency = 'CAD' | 'USD' | 'EUR' | 'GBP' | 'KRW';
+/** SAT denominates an invoice in whole satoshis; it has no fiat conversion in this application. */
+export type Currency = 'CAD' | 'USD' | 'EUR' | 'GBP' | 'KRW' | 'SAT';
 export type {PaymentMethod} from './payment-methods.js';
 import type {PaymentMethod} from './payment-methods.js';
 import type {InvoiceBalance} from './invoice-ledger.js';
+import type {InvoiceMethodAgreement,MethodPricingRule} from './method-pricing-types.js';
 import type {CurrencyBalanceSummary,CAD_REFERENCE_VALUATION} from './currency-report.js';
 export interface InvoiceItem { description: string; quantity: number; unitAmount: number; kind?:'service'|'expense'; adjustmentEligible?:boolean }
 /** Billing details captured when the invoice is issued; later contact edits do not change them. */
@@ -13,13 +15,18 @@ export interface InvoiceBilling {
   customerAddress?:string;
 }
 export interface Invoice {
+  methodPricing?:MethodPricingRule[]; priceAgreement?:InvoiceMethodAgreement;
   id: string; number: string; token: string; title: string; customerName: string;
   customerEmail?: string; issueDate?: string; dueDate?: string; paymentTermDays?:number; paymentTerms?:string; discountBps?:number; premiumBps?:number; discountAmount?:number; premiumAmount?:number; acceptedMethods?:PaymentMethod[]; currency: Currency; items: InvoiceItem[]; taxBps: number;
-  subtotal: number; tax: number; total: number; totalCad: number; amountSats: number;
+  subtotal: number; tax: number; total: number;
+  /** Legacy CAD reference value from the fixed demonstration rates; absent for SAT invoices, which have no fiat conversion. */
+  totalCad?: number;
+  /** Fiat invoices keep their historical demonstration reference; SAT invoices carry their exact satoshi total. */
+  amountSats?: number;
   status: 'open' | 'paid'; paymentMethod?: PaymentMethod; createdAt: string;balance?:InvoiceBalance;
   paidAt?: string; note?: string; billing?:InvoiceBilling; receiptToken?: string; settlementMode?:'simulation'|'live'; nativePayment?:{asset:string;atomicAmount:string;network:string;paymentId:string;verification:'provider'|'manual'};
 }
-export type PublicInvoice = Pick<Invoice, 'number' | 'title' | 'customerName' | 'currency' | 'items' | 'taxBps' | 'subtotal' | 'tax' | 'total' | 'amountSats' | 'status' | 'createdAt' | 'issueDate' | 'discountBps' | 'premiumBps' | 'discountAmount' | 'premiumAmount' | 'acceptedMethods' | 'dueDate' | 'paymentTermDays' | 'paymentTerms' | 'paidAt' | 'note' | 'billing' | 'paymentMethod' | 'settlementMode' | 'nativePayment' | 'balance'>;
+export type PublicInvoice = Pick<Invoice, 'number' | 'title' | 'customerName' | 'currency' | 'items' | 'taxBps' | 'subtotal' | 'tax' | 'total' | 'amountSats' | 'status' | 'createdAt' | 'issueDate' | 'discountBps' | 'premiumBps' | 'discountAmount' | 'premiumAmount' | 'acceptedMethods' | 'dueDate' | 'paymentTermDays' | 'paymentTerms' | 'paidAt' | 'note' | 'billing' | 'paymentMethod' | 'settlementMode' | 'nativePayment' | 'balance' | 'methodPricing'> & {priceAgreement?:Omit<InvoiceMethodAgreement,'invoiceId'|'referenceTotalCad'>};
 export interface Receipt {
   number: string; issuedAt: string; mode: 'simulation'|'live'; method: PaymentMethod; nativePayment?:Invoice['nativePayment'];
   amount: number; currency: Currency; amountSats?: number; invoiceNumber: string;

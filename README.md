@@ -69,10 +69,14 @@ recurring drafts keep it. See [invoice controls](docs/INVOICES.md).
 
 - Private passkey/Nostr accounts, encrypted record payloads, scoped API and MCP.
 - [Saved clients and invoice templates](docs/INVOICES.md), billing details captured
-  at issue time, invoice/receipt printing, CAD/USD/KRW/EUR/GBP, discounts, premiums,
-  accepted-method controls and private checkout links.
+  at issue time, invoice/receipt printing, CAD/USD/KRW/EUR/GBP plus whole-satoshi
+  SAT invoices (no fiat conversion; Bitcoin-native settlement only), discounts,
+  premiums, accepted-method controls and private checkout links.
 - [Payment terms and repeat work](docs/BUSINESS-TOOLS.md): Net30/60/90/custom
   calendar-day terms, manual recurring drafts, owner statements and CSV preview.
+- [Method-specific invoice prices](docs/METHOD-PRICING.md): optional per-method
+  discounts/premiums with a payer-confirmed public checkout offer; the agreed
+  effective total becomes the authoritative settlement target everywhere.
 - [Deposits and invoice balances](docs/INVOICE-LEDGER.md), separate installment
   receipts, credits, unpaid voids and exact currency CSV exports. Dashboard and
   Records report balances by invoice currency, with live/simulation rows separate.

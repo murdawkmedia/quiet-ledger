@@ -5,6 +5,14 @@ invoice list to see paid value, credit notes, amount due and any overpayment.
 Financial entries are encrypted and append-only. An invoice correction is never
 recorded as a transfer of funds.
 
+For a method-priced invoice with a confirmed payer agreement, the agreement's
+**effective total** — not the issued total — is the authoritative settlement
+target: paid, credited, due and overpaid are all measured against it, and
+`balance.effectiveTotal` exposes it to API/MCP callers. The issued subtotal, tax
+and total stay immutable; method discount, premium and tax adjustment appear
+separately. Until the payer confirms a price, receiving, credits, payment
+reports and settlement fail closed with no agreement.
+
 ## Request a deposit or installment
 
 Choose a configured live method and enter the requested amount in the invoice's
@@ -17,6 +25,10 @@ amount, destination and quote even after the balance changes. The provider must
 independently verify each payment. Each installment receives its own receipt;
 reloading or checking again does not allocate value twice. Subsequent payments
 use a new request for the remaining balance. The original invoice total stays.
+A request saved with an agreement keeps that exact `agreementId`, method and
+frozen amount across retries and recovery; installments on an agreed invoice
+prorate its CAD/satoshi references by `amount / effectiveTotal` and are limited
+by the current effective due.
 
 Already allocated requests can still receive funds after another payment or a
 credit. Verified excess value is retained as overpayment for review. The ledger
@@ -38,11 +50,16 @@ a receipt. Simulation records cannot use these owner financial mutations.
 
 ## Reports and compatibility
 
-**Records → Export invoice CSV** includes original total, paid, credited, due,
-overpaid, state and currency with exact decimals. It excludes wallet secrets,
-checkout tokens and guessed exchange rates. It is an invoice-balance report, not
-a complete tax/cost-basis ledger or bank statement. Spreadsheet formula prefixes
-are escaped. JSON evidence lists individual payment amounts and provenance.
+**Records → Export invoice CSV** includes original total, effective total,
+pricing method, original/effective tax, method discount, premium and signed tax
+adjustment, paid, credited, due, overpaid, state and currency with exact
+decimals. It excludes wallet secrets, checkout tokens and guessed exchange
+rates. It is an invoice-balance report, not a complete tax/cost-basis ledger or
+bank statement. Spreadsheet formula prefixes are escaped; the signed method tax
+adjustment keeps its leading minus as an ordinary numeric amount. The preview
+validator accepts both this format and the older 13-column header. JSON evidence
+(schemaVersion 2) lists individual payment amounts, method rules and the full
+agreement with provenance.
 
 Old single-receipt invoices retain their original CAD valuation and payment
 provenance when another outstanding request is paid. Their receipt rows stay
@@ -63,7 +80,9 @@ receiving and automatic outgoing execution are not added by this ledger phase.
 ## Currency reporting
 
 Dashboard and Records show invoice balances in each original currency, with live
-and simulation rows separate. Issued is the sum of original invoice totals.
+and simulation rows separate. Issued is the sum of original invoice totals;
+effective is the sum of confirmed method-price targets, and the method discount,
+premium and tax adjustment columns report the signed agreement adjustments.
 Payment value is the invoice amount allocated by its receipts; it is not a wallet
 asset balance. Credits reduce unpaid due. Voided balance is the remaining amount
 retired by voiding, after any credits. Overpaid value remains a separate column.

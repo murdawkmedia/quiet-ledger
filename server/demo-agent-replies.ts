@@ -32,7 +32,7 @@ export function renderDemoReply(role:DemoRole,intentOrInference:DemoReplyIntent|
  const inference=typeof intentOrInference==='string'?undefined:validateDemoInference(intentOrInference);
  const intent=inference?.intent??intentOrInference as DemoReplyIntent;
  if(!DEMO_REPLY_INTENTS.includes(intent))throw new Error('Unknown demo reply intent.');
- const amount=(n:number)=>context.currency+' '+new Intl.NumberFormat('en-CA',{minimumFractionDigits:context.currency==='KRW'?0:2,maximumFractionDigits:context.currency==='KRW'?0:2}).format(n/(context.currency==='KRW'?1:100));
+ const amount=(n:number)=>context.currency==='SAT'?'SAT '+new Intl.NumberFormat('en-CA',{maximumFractionDigits:0}).format(n):context.currency+' '+new Intl.NumberFormat('en-CA',{minimumFractionDigits:context.currency==='KRW'?0:2,maximumFractionDigits:context.currency==='KRW'?0:2}).format(n/(context.currency==='KRW'?1:100));
  const reference=context.invoiceNumber?`${context.invoiceNumber}: `:'';
  if(intent==='check-total')return `${reference}Subtotal ${amount(context.lineAmount)}, discount ${amount(context.discountAmount??0)}, premium ${amount(context.premiumAmount??0)}, tax ${amount(context.tax)}. The total is ${amount(context.total)}.`;
  if(intent==='explain-recorded-status')return context.status==='paid'?`${reference}The ledger records a simulated ${amount(context.total)} receipt. No real funds moved.`:`${reference}No payment is recorded on this fictional invoice. A chat message cannot confirm it; the merchant can record a simulated receipt.`;

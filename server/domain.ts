@@ -1,11 +1,14 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { Invoice, Payout, PublicInvoice, Receipt, PaymentMethod } from '../shared/contracts.js';
+import type { InvoiceMethodAgreement, MethodPricingRule } from '../shared/method-pricing-types.js';
+import { calculateMethodPrice, parseMethodPricingRules, METHOD_PRICING_MAX_RULES } from '../shared/method-pricing.js';
 import { DomainError, Store } from './store.js';
 import {InvoiceLedger} from './invoice-ledger.js';
 import {paymentDueDate} from '../shared/payment-terms.js';
-import {calculateInvoiceAmounts,invoiceAllowsMethod} from '../shared/invoice-options.js';
-import {PAYMENT_METHOD_IDS} from '../shared/payment-methods.js';
+import {calculateInvoiceAmounts,invoiceAllowsMethod,currencyAllowsMethod} from '../shared/invoice-options.js';
+import {PAYMENT_METHOD_IDS,METHOD_DEFINITIONS} from '../shared/payment-methods.js';
+import type {MethodId} from '../shared/payment-methods.js';
 import {canFundPayout,isCryptoMethod,methodInfo} from '../shared/payment-methods.js';
 
 export const DEMO_CAD_PER_BTC = 100000;
@@ -45,12 +48,28 @@ export const invoiceSchema = z.object({
   discountBps:z.number().int().min(0).max(10000).optional(),
   premiumBps:z.number().int().min(0).max(10000).optional(),
   acceptedMethods:z.array(z.enum(PAYMENT_METHOD_IDS)).min(1).max(PAYMENT_METHOD_IDS.length).refine(value=>new Set(value).size===value.length,'Select each accepted method only once.').optional(),
-  currency: z.enum(['CAD', 'USD', 'EUR', 'GBP','KRW']),
+  currency: z.enum(['CAD', 'USD', 'EUR', 'GBP','KRW','SAT']),
   items: z.array(z.object({ description: z.string().trim().min(1).max(240), quantity: z.number().int().min(1).max(10000), unitAmount: z.number().int().min(0).max(maxAmount), kind:z.enum(['service','expense']).optional(), adjustmentEligible:z.boolean().optional() }).strict()).min(1).max(40),
   taxBps: z.number().int().min(0).max(10000).optional(),
   note: z.string().trim().max(2000).optional(),
   billing:invoiceBillingSchema.optional(),
-}).strict().refine(value=>!value.issueDate||!value.dueDate||value.dueDate>=value.issueDate,'Due date must not precede the issue date.').superRefine((value,context)=>{if(value.paymentTermDays!==undefined&&value.issueDate){try{const due=paymentDueDate(value.issueDate,value.paymentTermDays);if(value.dueDate&&value.dueDate!==due)context.addIssue({code:'custom',message:'Due date does not match the selected payment terms.'});}catch(error){context.addIssue({code:'custom',message:(error as Error).message});}}});
+  /** Optional strict per-method price rules; at most one per canonical method, each with a nonzero rate. */
+  methodPricing:z.array(z.object({method:z.enum(METHOD_DEFINITIONS.map(row=>row.id) as [MethodId,...MethodId[]]),discountBps:z.number().int().min(0).max(10000).optional(),premiumBps:z.number().int().min(0).max(10000).optional()}).strict()).min(1).max(METHOD_PRICING_MAX_RULES).optional(),
+}).strict().refine(value=>!value.issueDate||!value.dueDate||value.dueDate>=value.issueDate,'Due date must not precede the issue date.').superRefine((value,context)=>{if(value.paymentTermDays!==undefined&&value.issueDate){try{const due=paymentDueDate(value.issueDate,value.paymentTermDays);if(value.dueDate&&value.dueDate!==due)context.addIssue({code:'custom',message:'Due date does not match the selected payment terms.'});}catch(error){context.addIssue({code:'custom',message:(error as Error).message});}}}).superRefine((value,context)=>{if(value.currency==='SAT'&&value.acceptedMethods?.some(method=>!currencyAllowsMethod('SAT',method)))context.addIssue({code:'custom',message:'SAT invoices accept Bitcoin-native and owner-reviewed noncash methods only.'});})
+  .superRefine((value,context)=>{
+    // Full strict rule validation shared by invoices, templates and recurring drafts:
+    // canonical methods only, accepted/currency compatible, nonzero rates, unique entries
+    // and every effective total inside the existing 1..1_000_000_000 range.
+    if(value.methodPricing===undefined)return;
+    try{
+      const rules=parseMethodPricingRules(value.methodPricing,{currency:value.currency,acceptedMethods:value.acceptedMethods});
+      if(!rules)return;
+      const calculated=calculateInvoiceAmounts(value.items,value.taxBps??0,value.discountBps??0,value.premiumBps??0);
+      const draft={items:value.items,taxBps:value.taxBps??0,currency:value.currency,subtotal:calculated.subtotal,tax:calculated.tax,total:calculated.total,
+        ...(value.discountBps!==undefined?{discountBps:value.discountBps,discountAmount:calculated.discountAmount}:{}),...(value.premiumBps!==undefined?{premiumBps:value.premiumBps,premiumAmount:calculated.premiumAmount}:{})};
+      for(const rule of rules)calculateMethodPrice(draft as Parameters<typeof calculateMethodPrice>[0],rule);
+    }catch(error){context.addIssue({code:'custom',message:(error as Error).message});}
+  });
 
 export function parse<T>(schema: z.ZodType<T>, body: unknown): T {
   const result = schema.safeParse(body);
@@ -66,13 +85,32 @@ export function createInvoice(store: Store, workspace: string, body: unknown, no
     if(input.dueDate&&input.dueDate!==due)throw new DomainError(400,'Due date does not match the selected payment terms.');
     input.issueDate=issue;input.dueDate=due;
   }
+  // Store the canonical rule snapshot on the immutable invoice; templates and plans keep
+  // their own ordinary draft snapshots, and later edits never affect an issued invoice.
+  const methodPricing=parseMethodPricingRules(input.methodPricing,{currency:input.currency,acceptedMethods:input.acceptedMethods});
+  if(methodPricing)input.methodPricing=methodPricing;
   const taxBps=input.taxBps??0;
   const calculated=calculateInvoiceAmounts(input.items,taxBps,input.discountBps??0,input.premiumBps??0);
   const subtotalBig=BigInt(calculated.subtotal),taxBig=BigInt(calculated.tax),totalBig=BigInt(calculated.total);
+  if (totalBig < 1n || totalBig > BigInt(maxAmount)) throw new DomainError(400, 'Invoice total is outside the supported demonstration range.');
+  if (input.currency === 'SAT') {
+    // SAT denominates the invoice in whole satoshis. No fiat reference is invented:
+    // totalCad stays absent and amountSats binds the exact invoice total.
+    const invoice: Invoice = {
+      ...input, customerEmail: input.customerEmail || undefined, id: randomUUID(), token: token(),
+      number: `QL-${String(store.listInvoices(workspace).length + 1).padStart(4, '0')}`,
+      taxBps,...(input.discountBps!==undefined?{discountAmount:calculated.discountAmount}:{}),...(input.premiumBps!==undefined?{premiumAmount:calculated.premiumAmount}:{}), subtotal: Number(subtotalBig), tax: Number(taxBig), total: Number(totalBig),
+      amountSats: Number(totalBig),
+      status: 'open', createdAt: now.toISOString(),
+    };
+    store.addInvoice(workspace, invoice);
+    store.audit(workspace, 'invoice.created', `${invoice.number} issued for ${invoice.customerName}.`, now.toISOString());
+    return invoice;
+  }
   const demoRates={CAD:100n,USD:140n,EUR:150n,GBP:180n,KRW:0n};
   // KRW fixed simulation reference:1000 won per CAD; this is not a live FX quote.
   const totalCadBig=input.currency==='KRW'?(totalBig+5n)/10n:(totalBig*demoRates[input.currency]+50n)/100n;
-  if (totalBig < 1n || totalBig > BigInt(maxAmount) || totalCadBig < 1n || totalCadBig > BigInt(maxAmount)) throw new DomainError(400, 'Invoice total is outside the supported demonstration range.');
+  if (totalCadBig < 1n || totalCadBig > BigInt(maxAmount)) throw new DomainError(400, 'Invoice total is outside the supported demonstration range.');
   const invoice: Invoice = {
     ...input, customerEmail: input.customerEmail || undefined, id: randomUUID(), token: token(),
     number: `QL-${String(store.listInvoices(workspace).length + 1).padStart(4, '0')}`,
@@ -86,18 +124,28 @@ export function createInvoice(store: Store, workspace: string, body: unknown, no
 }
 
 export function publicInvoice(invoice: Invoice): PublicInvoice {
-  const { number, title, customerName, currency, items, taxBps, subtotal, tax, total, amountSats, status, createdAt, issueDate, dueDate, discountBps,premiumBps,discountAmount,premiumAmount,acceptedMethods, paidAt, note, billing, paymentMethod,settlementMode,nativePayment,balance,paymentTermDays,paymentTerms } = invoice;
-  return { number, title, customerName, currency, items, taxBps, subtotal, tax, total, amountSats, status, createdAt, issueDate, dueDate, discountBps,premiumBps,discountAmount,premiumAmount,acceptedMethods, paidAt, note, ...(billing?{billing:{...billing}}:{}), paymentMethod,settlementMode,nativePayment,...(paymentTermDays!==undefined?{paymentTermDays}:{}),...(paymentTerms?{paymentTerms}:{}),...(balance?{balance}:{}) };
+  const { number, title, customerName, currency, items, taxBps, subtotal, tax, total, amountSats, status, createdAt, issueDate, dueDate, discountBps,premiumBps,discountAmount,premiumAmount,acceptedMethods, paidAt, note, billing, paymentMethod,settlementMode,nativePayment,balance,paymentTermDays,paymentTerms,methodPricing,priceAgreement } = invoice;
+  // The public agreement is sanitized: no invoice id, no labelled CAD reference, no capability.
+  const safeAgreement=priceAgreement?(({invoiceId:_invoiceId,referenceTotalCad:_referenceTotalCad,...rest}:InvoiceMethodAgreement)=>rest)(priceAgreement):undefined;
+  return { number, title, customerName, currency, items, taxBps, subtotal, tax, total, amountSats, status, createdAt, issueDate, dueDate, discountBps,premiumBps,discountAmount,premiumAmount,acceptedMethods, paidAt, note, ...(billing?{billing:{...billing}}:{}), paymentMethod,settlementMode,nativePayment,...(paymentTermDays!==undefined?{paymentTermDays}:{}),...(paymentTerms?{paymentTerms}:{}),...(balance?{balance}:{}),
+    ...(methodPricing?{methodPricing}:{}),...(safeAgreement?{priceAgreement:safeAgreement}:{}) };
 }
 
 export function settleInvoice(store: Store, workspace: string, invoice: Invoice, method: PaymentMethod, now: Date) {
   if(!invoiceAllowsMethod(invoice,method))throw new DomainError(400,'This payment method is not accepted for this invoice.');
+  if(!currencyAllowsMethod(invoice.currency,method))throw new DomainError(400,`${invoice.currency}-denominated invoices settle in Bitcoin-native or owner-reviewed noncash methods only.`);
   if (invoice.status === 'paid') return { invoice: publicInvoice(invoice), receiptToken: invoice.receiptToken!, alreadyPaid: true };
-  const ledger=new InvoiceLedger(store),balance=ledger.balance(invoice,workspace);
+  const ledger=new InvoiceLedger(store),pricing=ledger.agreements;
+  // A method-priced invoice settles only its confirmed effective price, with the agreed method.
+  const agreement=invoice.methodPricing?.length?pricing.forInvoice(workspace,invoice.id):undefined;
+  if(invoice.methodPricing?.length&&!agreement)throw new DomainError(409,'Confirm a payment-method price before settling this invoice.','METHOD_AGREEMENT_REQUIRED');
+  const canonical=(value:PaymentMethod)=>value==='square'?'card':value==='bank_transfer'?'bank':value;
+  if(agreement&&canonical(method)!==agreement.method)throw new DomainError(409,'This payment method does not match the confirmed method price.','METHOD_AGREEMENT_MISMATCH');
+  const balance=ledger.balance(invoice,workspace);
   const liveRequest=store.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='receiving_requests'").get()&&store.db.prepare('SELECT id,data FROM receiving_requests WHERE invoice_id=? AND workspace=?').all(invoice.id,workspace).some(row=>store.decode<any>(row.data,'receiving_requests',String(row.id),workspace).mode==='live');
-  if(balance.due!==invoice.total||balance.state==='void'||liveRequest)throw new DomainError(409,'An adjusted or live receiving invoice cannot be settled by a simulated payment.');
+  if(balance.due!==balance.effectiveTotal||balance.state==='void'||liveRequest)throw new DomainError(409,'An adjusted or live receiving invoice cannot be settled by a simulated payment.');
   const receiptToken = token();
-  const receipt: Receipt = { number: `R-${invoice.number}`, issuedAt: now.toISOString(), mode: 'simulation', method, amount: invoice.total, currency: invoice.currency, invoiceNumber: invoice.number, title: invoice.title, customerName: invoice.customerName, ...(method === 'cashu' ? { amountSats: invoice.amountSats } : {}) };
+  const receipt: Receipt = { number: `R-${invoice.number}`, issuedAt: now.toISOString(), mode: 'simulation', method, amount: agreement?.effectiveTotal??invoice.total, currency: invoice.currency, invoiceNumber: invoice.number, title: invoice.title, customerName: invoice.customerName, ...(method === 'cashu' ? { amountSats: agreement?.referenceAmountSats ?? invoice.amountSats } : {}) };
   const paid: Invoice = { ...invoice, status: 'paid', paymentMethod: method, paidAt: now.toISOString(), receiptToken };
   store.addReceipt(receiptToken, invoice.id, receipt);
   store.saveInvoice(paid);
@@ -107,7 +155,13 @@ export function settleInvoice(store: Store, workspace: string, invoice: Invoice,
 
 const payoutSchema = z.object({ invoiceId: z.string().min(1).max(100), provider: z.enum(['bullbitcoin', 'bitcoinwell', 'wise']), destinationType: z.enum(['bank', 'bill']), recipientLabel: z.string().trim().min(1).max(120), amount: amountSchema }).strict();
 export function availableForInvoice(store: Store, workspace: string, invoice: Invoice): number {
-  return invoice.status === 'paid' && invoice.settlementMode!=='live' && canFundPayout(invoice.paymentMethod) ? invoice.totalCad - store.listPayouts(workspace).filter(p => p.invoiceId === invoice.id && p.status !== 'quoted').reduce((sum, payout) => sum + payout.totalDebit, 0) : 0;
+  // SAT invoices have no CAD reference value, so they cannot fund simulated CAD payouts.
+  if(invoice.currency==='SAT')return 0;
+  // A method agreement settles at its own effective price: simulated payout availability
+  // follows that actual reference, never the original CAD reference after a discount.
+  const agreement=invoice.methodPricing?.length?new InvoiceLedger(store).agreements.forInvoice(workspace,invoice.id):undefined;
+  const reference=agreement?.referenceTotalCad??invoice.totalCad;
+  return invoice.status === 'paid' && invoice.settlementMode!=='live' && canFundPayout(invoice.paymentMethod) ? reference! - store.listPayouts(workspace).filter(p => p.invoiceId === invoice.id && p.status !== 'quoted').reduce((sum, payout) => sum + payout.totalDebit, 0) : 0;
 }
 
 export function createQuote(store: Store, workspace: string, body: unknown, now: Date): Payout {
@@ -115,6 +169,7 @@ export function createQuote(store: Store, workspace: string, body: unknown, now:
   const invoice = store.getInvoice(input.invoiceId, workspace);
   if (!invoice) throw new DomainError(404, 'Invoice not found.');
   if (invoice.status !== 'paid') throw new DomainError(409, 'Receive the invoice payment before preparing a payout.');
+  if(invoice.currency==='SAT')throw new DomainError(409,'SAT-denominated invoices have no CAD reference value, so they cannot fund simulated CAD payouts.');
   if(invoice.settlementMode==='live'||!canFundPayout(invoice.paymentMethod))throw new DomainError(409,'This payment cannot fund a simulated payout. Live receipts, stablecoins and noncash settlements require their own supported route.');
   if (input.provider === 'wise' && isCryptoMethod(invoice.paymentMethod!)) throw new DomainError(400, 'Wise is available here only for ordinary fiat-funded business payouts, not crypto-origin funds.');
   if (input.provider === 'wise' && input.destinationType === 'bill') throw new DomainError(400, 'The Wise adapter is for bank payouts, not Canadian bill payment.');

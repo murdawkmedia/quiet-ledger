@@ -12,7 +12,7 @@ export function demoRooms(lease:{rooms?:Partial<Record<DemoChannel,DemoRoom>>;gr
 export const DEMO_ROLE_NAMES:Record<DemoRole,string>={client:'Riley',accountant:'Jordan'};
 export const DEMO_REPLY_INTENTS=['conversation','explain-scope','check-total','request-review','explain-recorded-status','explain-marmot'] as const;
 export type DemoReplyIntent=typeof DEMO_REPLY_INTENTS[number];
-export interface DemoCase {fictional:true;currency:'CAD'|'USD'|'KRW'|'EUR'|'GBP';lineAmount:number;tax:number;total:number;discountAmount?:number;premiumAmount?:number;invoiceNumber?:string;title?:string;status:'open'|'paid';settlementMode:'simulation';receiptRecorded:boolean;version:number;asOf:string}
+export interface DemoCase {fictional:true;currency:'CAD'|'USD'|'KRW'|'EUR'|'GBP'|'SAT';lineAmount:number;tax:number;total:number;discountAmount?:number;premiumAmount?:number;invoiceNumber?:string;title?:string;status:'open'|'paid';settlementMode:'simulation';receiptRecorded:boolean;version:number;asOf:string}
 export interface DemoMember {role:DemoRole;name:string;pubkey:string}
 export interface DemoTurnIssue {messageId:string;role:DemoRole;channel:DemoChannel}
 export interface DemoAgentProvider {runtime:'hermes'|'codex';model?:string;reasoningEffort?:'max'}

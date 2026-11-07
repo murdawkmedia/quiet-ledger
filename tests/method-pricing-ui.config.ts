@@ -1,0 +1,3 @@
+import {defineConfig} from '@playwright/test';
+import {resolve} from 'node:path';
+export default defineConfig({testDir:'.',testMatch:'method-pricing-ui.spec.ts',workers:1,timeout:25000,expect:{timeout:5000},outputDir:'.runtime/method-pricing-ui-results',reporter:[['list']],use:{baseURL:'http://127.0.0.1:4355',browserName:'chromium',headless:true,timezoneId:'America/Edmonton',launchOptions:{executablePath:'/usr/bin/chromium'}},webServer:{command:'node --import tsx tests/method-pricing-ui-app.ts',cwd:resolve(import.meta.dirname,'..'),url:'http://127.0.0.1:4355/tests/fixtures/method-pricing-ui.html',reuseExistingServer:false}});

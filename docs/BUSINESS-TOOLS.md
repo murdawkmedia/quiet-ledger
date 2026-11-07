@@ -43,7 +43,9 @@ No email is sent by this action. Use the invoice's separate reviewed email flow.
 Select the exact invoices to include in a statement preview; names are not treated
 as client identities. The preview contains their immutable issued details,
 allocations/credits and original-currency balances with live/simulation separated.
-Download or print it locally. It contains no checkout/receipt bearer tokens,
+A method-priced invoice also shows its issued rules and the confirmed price
+agreement, with the effective total as the settlement target. Download or print
+it locally. It contains no checkout/receipt bearer tokens,
 provider payment IDs, private owner notes or customer email addresses. It does not
 create a public portal, share a statement or send email.
 
@@ -51,7 +53,10 @@ CSV preview accepts the app's invoice balance export header and at most200record
 32columns and16KiB UTF-8. Quoted commas/newlines/escaped quotes and a BOM are
 supported. It checks currencies, dates, exact minor units, whole won and balance
 consistency; labels existing invoice numbers, within-file duplicates, invalid rows
-and new candidates. It does not evaluate formulas or follow URLs. This is a preview:
+and new candidates. It accepts both the current 21-column export (with the
+Effective total, Pricing method, method adjustment and Agreement columns, whose
+effective equation, canonical method and agreement id must match exactly) and the
+older 13-column header. It does not evaluate formulas or follow URLs. This is a preview:
 no invoices, payments or receipts are imported, changed or reconstructed.
 
 New business-tool routes are owner-browser-only with the existing same-origin/CSRF

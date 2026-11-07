@@ -83,7 +83,7 @@ function contextBinding(context:ReceivingContext,mode:string,receiver:string):st
   if(context.method!=='lightning')throw new Error('Receiving method does not match LNURL.');
   if(context.mode!==mode)throw new Error('Receiving mode does not match LNURL.');
   if(typeof context.expectedAtomic!=='string'||!/^[1-9][0-9]{0,15}$/.test(context.expectedAtomic)||BigInt(context.expectedAtomic)>2_100_000_000_000_000n)throw new Error('Invalid native amount.');
-  if(!['CAD','USD','EUR','GBP','KRW'].includes(context.currency))throw new Error('Invalid invoice currency.');
+  if(!['CAD','USD','EUR','GBP','KRW','SAT'].includes(context.currency))throw new Error('Invalid invoice currency.');
   const start=Date.parse(context.createdAt),end=Date.parse(context.expiresAt);
   if(!Number.isFinite(start)||!Number.isFinite(end)||end<=start||end-start>7*86400_000)throw new Error('Invalid receiving window.');
   return digest(JSON.stringify([context.requestId,context.idempotencyKey,context.method,context.amount,context.currency,context.expectedAtomic,context.createdAt,context.expiresAt,context.mode,receiver]));

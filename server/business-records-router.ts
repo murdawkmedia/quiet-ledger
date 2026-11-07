@@ -15,8 +15,8 @@ function ownerWorkspace(res:Response){
  return session.workspace;
 }
 function snapshot(invoice:Invoice):StatementInvoice{
- const {id,number,title,customerName,currency,taxBps,subtotal,tax,total,status,createdAt,issueDate,dueDate,paidAt,paymentTermDays,paymentTerms,discountBps,premiumBps,discountAmount,premiumAmount}=invoice;
- return {id,number,title,customerName,currency,items:invoice.items.map(({description,quantity,unitAmount,kind,adjustmentEligible})=>({description,quantity,unitAmount,...(kind!==undefined?{kind}:{}),...(adjustmentEligible!==undefined?{adjustmentEligible}:{})})),taxBps,subtotal,tax,total,status,createdAt,issueDate,dueDate,paidAt,paymentTermDays,paymentTerms,discountBps,premiumBps,discountAmount,premiumAmount};
+ const {id,number,title,customerName,currency,taxBps,subtotal,tax,total,status,createdAt,issueDate,dueDate,paidAt,paymentTermDays,paymentTerms,discountBps,premiumBps,discountAmount,premiumAmount,methodPricing,priceAgreement}=invoice;
+ return {id,number,title,customerName,currency,items:invoice.items.map(({description,quantity,unitAmount,kind,adjustmentEligible})=>({description,quantity,unitAmount,...(kind!==undefined?{kind}:{}),...(adjustmentEligible!==undefined?{adjustmentEligible}:{})})),taxBps,subtotal,tax,total,status,createdAt,issueDate,dueDate,paidAt,paymentTermDays,paymentTerms,discountBps,premiumBps,discountAmount,premiumAmount,...(methodPricing!==undefined?{methodPricing}:{}),...(priceAgreement!==undefined?{priceAgreement}:{})};
 }
 function safeEntry(entry:InvoiceLedgerEntry):StatementEntry{
  const {id,kind,amount,currency,createdAt,reason,method,verification,receiptNumber}=entry;return {id,kind,amount,currency,createdAt,reason,method,verification,receiptNumber};

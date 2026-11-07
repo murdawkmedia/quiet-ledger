@@ -20,8 +20,8 @@ test('dashboard and scoped evidence agree on exact currency balances without a p
   const before=(await owner.get('/api/evidence/export').expect(200)).body;
   const dashboard=(await owner.get('/api/dashboard').expect(200)).body;
   assert.deepEqual(dashboard.currencyBalances,[
-   {currency:'USD',mode:'live',invoiceCount:1,issued:10000,paid:2500,credited:0,voided:0,due:7500,overpaid:0},
-   {currency:'KRW',mode:'live',invoiceCount:1,issued:150001,paid:0,credited:1,voided:0,due:150000,overpaid:0},
+   {currency:'USD',mode:'live',invoiceCount:1,issued:10000,effective:10000,paid:2500,credited:0,voided:0,due:7500,overpaid:0,methodDiscount:0,methodPremium:0,methodTaxAdjustment:0},
+   {currency:'KRW',mode:'live',invoiceCount:1,issued:150001,effective:150001,paid:0,credited:1,voided:0,due:150000,overpaid:0,methodDiscount:0,methodPremium:0,methodTaxAdjustment:0},
   ]);
   assert.equal(dashboard.valuation.invoicedCad,'reference_only');assert.equal(dashboard.totals.receivedCad,321);
   const evidence=(await request(app).get('/api/v1/evidence/export').set('Authorization','Bearer '+exporter).expect(200)).body;assert.deepEqual(evidence.currencyBalances,dashboard.currencyBalances);assert.deepEqual(evidence.valuation,dashboard.valuation);

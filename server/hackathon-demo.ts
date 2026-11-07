@@ -1,6 +1,7 @@
 import {createHash, randomBytes, randomUUID, timingSafeEqual} from 'node:crypto';
 import type {Invoice} from '../shared/contracts.js';
 import {createInvoice, settleInvoice} from './domain.js';
+import {MethodPriceAgreements} from './method-pricing.js';
 import {DomainError, type Store, type StoredSession} from './store.js';
 
 export interface HackathonDemoOptions {store: Store; now?: () => Date}
@@ -26,9 +27,11 @@ export class HackathonDemo {
   private store: Store;
   private now: () => Date;
   private clients = new Map<string, ClientBudget>();
+  private pricing: MethodPriceAgreements;
   constructor(options: HackathonDemoOptions) {
     this.store = options.store;
     this.now = options.now ?? (() => new Date());
+    this.pricing = new MethodPriceAgreements(this.store);
     this.store.db.exec(`CREATE TABLE IF NOT EXISTS ${table} (id TEXT PRIMARY KEY, account_id TEXT NOT NULL UNIQUE, expires_at TEXT NOT NULL, data TEXT NOT NULL);`);
   }
   start(password: string, clientId: string, resumeToken?: unknown): HackathonDemoAccess {
@@ -159,6 +162,9 @@ export class HackathonDemo {
     return this.store.transaction(()=>{
       const previous=this.view(workspace),data=this.record(workspace)!;
       if(this.store.listInvoices(workspace).length>=8)throw new DomainError(429,'This demo visit has reached its eight-invoice limit.');
+      // Method-priced fictional demo invoices are not supported: their agreements have no
+      // demo retention path yet. Fail closed before any invoice or audit row is written.
+      if(typeof body==='object'&&body!==null&&'methodPricing'in body)throw new DomainError(400,'Method-priced invoices are not supported in this fictional demo.');
       const invoice=createInvoice(this.store,workspace,body,this.now());
       // Agent snapshots validate every component, not only the discounted total.
       // Keep the whole demo creation transactional so a rejected case leaves no invoice or audit row.
@@ -171,7 +177,11 @@ export class HackathonDemo {
     return this.store.transaction(() => {
       const {invoice,caseVersion} = this.view(workspace);
       if (invoice.settlementMode !== 'simulation' || invoice.nativePayment) throw new DomainError(409, 'Only the fictional simulated invoice can use the demo payment action.');
-      const method=invoice.acceptedMethods?.[0]??'cashu';
+      // The acceptedMethods[0] shortcut cannot settle a method-priced invoice at its base
+      // price: require an existing public agreement and use its method and effective price.
+      const agreement=invoice.methodPricing?.length?this.pricing.forInvoice(workspace,invoice.id):undefined;
+      if(invoice.methodPricing?.length&&!agreement)throw new DomainError(409,'Confirm a payment-method price before using the demo payment action.','METHOD_AGREEMENT_REQUIRED');
+      const method=agreement?.method??invoice.acceptedMethods?.[0]??'cashu';
       settleInvoice(this.store, workspace, invoice, method, this.now());
       if(invoice.status!=='paid'){const data=this.record(workspace)!;const next={...data,caseVersion:caseVersion+1};this.store.db.prepare(`UPDATE ${table} SET data=? WHERE id=?`).run(this.store.encode(next,table,workspace,workspace),workspace);}
       return this.view(workspace);

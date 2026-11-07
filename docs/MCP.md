@@ -101,10 +101,10 @@ stderr and omit private paths and token values.
 | --- | --- | --- |
 | `list_payment_methods` | `invoices:read` | Lists methods and configured adapters with live/test mode. |
 | `list_invoices` | `invoices:read` | Lists a bounded batch of invoice summaries. |
-| `get_invoice` | `invoices:read` | Reads an invoice and its line items. |
-| `create_invoice` | `invoices:write` | Saves an invoice with a stable retry key. |
+| `get_invoice` | `invoices:read` | Reads an invoice, its line items, `methodPricing` rules and any confirmed `priceAgreement`. |
+| `create_invoice` | `invoices:write` | Saves an invoice with a stable retry key; optional canonical `methodPricing` rules. |
 | `list_receive_requests` | `receiving:read` | Lists saved receiving requests and verification states. |
-| `create_receive_request` | `receiving:write` | Allocates receiving instructions for an existing invoice. |
+| `create_receive_request` | `receiving:write` | Allocates receiving instructions for an existing invoice; priced invoices require the payer-confirmed `agreementId`. |
 | `check_receive_request` | `receiving:write` | Reads the provider and persists verification or a receipt. |
 | `get_collateral` | `collateral:read` | Observes configured existing Bitcoin mainnet UTXOs. |
 | `get_ark_status` | `collateral:read` | Observes configured Bark/Ark virtual balance and network. |
@@ -134,6 +134,15 @@ same list tool until null. Do not invent, decode or increment cursors. The
 versioned app routes own pagination; the legacy browser lists retain their
 existing response behavior. A listing above 100 rows is rejected by MCP instead
 of silently truncating. Large records may require a smaller `limit`.
+
+A method-priced invoice carries canonical per-method rules in `methodPricing`
+(aliases like `square`/`bank_transfer` are rejected). Its `priceAgreement` —
+read through `get_invoice` or `get_invoice_ledger` — is the single
+payer-confirmed price, and `balance.effectiveTotal` is the authoritative
+settlement target. An owner/API/MCP caller can never confirm or change that
+price: only the payer's public checkout token creates the agreement. Pass the
+agreement's exact `agreementId` to `create_receive_request`; requests for a
+priced invoice are bound to it and fail closed without it.
 
 Results include structured data plus matching JSON text. Invoice checkout and
 receipt bearer tokens, receive-request bearer tokens and provider `opaque`

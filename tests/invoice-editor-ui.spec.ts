@@ -36,6 +36,32 @@ test('mobile invoice form keeps date validation and template controls usable wit
 });
 
 
+test('whole-satoshi SAT invoices reject fractional prices and hide fiat settlement methods',async({page})=>{
+ const calls=await fixture(page);
+ await page.getByRole('combobox',{name:'Invoice currency',exact:true}).selectOption('SAT');
+ await expect(page.getByText('whole sats, no decimal places',{exact:false})).toBeVisible();
+ await page.getByLabel('Customer name',{exact:true}).fill('Fictional satoshi studio');
+ await page.getByLabel('Invoice title',{exact:true}).fill('Whole-satoshi workshop');
+ await page.getByLabel('Item 1 description',{exact:true}).fill('Fictional recording');
+ await page.getByLabel('Item 1 unit price',{exact:true}).fill('21000.5');
+ await page.getByRole('button',{name:'Create invoice',exact:true}).click();
+ await expect(page.getByRole('alert')).toContainText('whole-satoshi');
+ expect(calls.filter(call=>call.url.endsWith('/api/invoices'))).toHaveLength(0);
+ await page.getByLabel('Item 1 unit price',{exact:true}).fill('21000');
+ await page.getByLabel('Tax rate (%)',{exact:true}).fill('0');
+ await expect(page.getByTestId('invoice-total')).toHaveText('21,000 sats');
+ for(const label of ['Accept Card','Accept Bank transfer','Accept Interac e-Transfer','Accept Tether · USDT'])await expect(page.getByRole('checkbox',{name:label,exact:true})).toHaveCount(0);
+ await expect(page.getByRole('checkbox',{name:'Accept Bitcoin',exact:true})).toBeVisible();
+ await expect(page.getByRole('checkbox',{name:'Accept Lightning',exact:true})).toBeVisible();
+ await expect(page.getByText('SAT invoices settle in whole satoshis:',{exact:false})).toBeVisible();
+ await page.getByRole('button',{name:'Create invoice',exact:true}).click();
+ await expect(page.locator('body')).toHaveAttribute('data-created','true');
+ const saved=calls.find(call=>call.url.endsWith('/api/invoices'));
+ expect(saved.body.currency).toBe('SAT');
+ expect(saved.body.acceptedMethods).toEqual(['bitcoin','lightning']);
+ expect(saved.body.items[0].unitAmount).toBe(21000);
+});
+
 test('KRW checkout offers only connections supporting the invoice currency',async({page})=>{
   await page.route('**/api/checkout/fictional-checkout',route=>route.fulfill({json:{invoice:{...draft,acceptedMethods:['bitcoin','card'],number:'QL-FIXTURE',subtotal:200000,discountAmount:20000,premiumAmount:10000,tax:0,total:190000,status:'open',createdAt:'2026-11-05T00:00:00Z'},payment:{mode:'simulation',amountSats:190000,request:'fictional'},adapters:[{id:'dollar-card',mode:'live',configured:true,methods:['card'],supportedCurrencies:['CAD','USD']},{id:'btc',mode:'live',configured:true,methods:['bitcoin']}]}}));
   await page.goto('/tests/fixtures/invoice-editor-ui.html?checkout');

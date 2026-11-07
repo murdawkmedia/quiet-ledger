@@ -10,7 +10,13 @@ function ratio(value:unknown){
 const round=(numerator:bigint,denominator:bigint)=>(numerator+denominator/2n)/denominator;
 export async function quoteReceiving(invoice:Invoice,method:MethodId,mode:'live'|'test',fetcher:HttpFetch=fetch):Promise<ReceivingQuote>{
   const info=methodInfo(method),observedAt=new Date().toISOString();
-  if(mode==='test')return {expectedAtomic:String(info.settlement==='bitcoin'?invoice.amountSats:info.settlement==='stablecoin'?(invoice.currency==='USD'?invoice.total*10000:Math.round(invoice.totalCad*1000000/140)):invoice.total),cadEquivalent:invoice.totalCad,source:'Explicit fixed demonstration rates; test mode only',observedAt};
+  if(invoice.currency==='SAT'){
+    // A SAT invoice binds its own exact satoshi amount. There is no fiat conversion,
+    // no price reference and no network request in either mode.
+    if(info.settlement!=='bitcoin')throw new Error('SAT invoices support Bitcoin-native receiving methods only.');
+    return {expectedAtomic:String(invoice.total),cadEquivalent:undefined,source:'Exact SAT invoice denomination; no fiat conversion',observedAt};
+  }
+  if(mode==='test')return {expectedAtomic:String(info.settlement==='bitcoin'?invoice.amountSats:info.settlement==='stablecoin'?(invoice.currency==='USD'?invoice.total*10000:Math.round(invoice.totalCad!*1000000/140)):invoice.total),cadEquivalent:invoice.totalCad,source:'Explicit fixed demonstration rates; test mode only',observedAt};
   if(invoice.currency==='CAD'&&info.settlement!=='bitcoin'&&info.settlement!=='stablecoin')return {expectedAtomic:String(invoice.total),cadEquivalent:invoice.total,source:'Exact CAD invoice amount; no currency conversion',observedAt};
   const exchange=await providerJson(fetcher,`https://api.coinbase.com/v2/exchange-rates?currency=${invoice.currency}`,{method:'GET'},'Price reference');
   if(exchange?.data?.currency!==invoice.currency)throw new Error('Price-reference currency mismatch.');

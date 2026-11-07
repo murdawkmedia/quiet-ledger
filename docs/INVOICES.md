@@ -21,7 +21,9 @@ intact. Private client notes are not invoice billing details.
 
 Choose **New invoice**, fill in the client, and choose issue and due dates using
 the date pickers. A due date cannot precede the issue date. CAD, USD, EUR and GBP
-use two decimal places; KRW uses whole won. Choose the invoice currency explicitly.
+use two decimal places; KRW uses whole won. SAT denominates the invoice in whole
+satoshis: no decimal places, no fiat conversion and no CAD reference value. Choose
+the invoice currency explicitly.
 
 Each line has a description, quantity, unit price and **Line type**. Service/labour
 lines start with **Apply discounts and premiums** checked. Expense/reimbursement
@@ -61,6 +63,33 @@ required. The server enforces the selection for checkout, receiving instructions
 and settlement, even if a caller bypasses the browser. A selected method still
 requires a suitable connected provider, supported currency and live/test mode.
 No provider is connected or funded automatically.
+
+SAT invoices settle only in whole satoshis: the accepted-method list and checkout
+offer Bitcoin-native methods (Bitcoin, Lightning, Liquid, Cashu, Ark) plus
+owner-reviewed noncash adjustments. Fiat, bank, card and stablecoin rails are
+excluded, because paying sats through them would imply an unquoted conversion.
+A SAT invoice carries no CAD reference value: it is excluded from the dashboard's
+CAD reference totals and cannot fund simulated CAD payouts. Reports, CSV exports
+and the currency balance table show its exact whole-satoshi amounts separately.
+
+### Method-specific prices
+
+An invoice can also carry per-method price rules (`methodPricing`), for example a
+Lightning discount or a card premium. A rule applies to the same
+adjustment-eligible lines as ordinary discounts/premiums; the issued subtotal,
+tax and total stay immutable. Only the private owner workspace can create a
+method-priced invoice. See [METHOD-PRICING.md](METHOD-PRICING.md) for the full
+contract.
+
+The payer confirms one complete server-computed offer on the public checkout
+(`POST /api/checkout/:token/method-agreement` with the exact `offerHash`) before
+any payment. Until then the checkout hides the simulated payment request and
+serves only `pricingOffers`; receiving, payment reports, credits, sandbox tests
+and simulated settlement all fail closed. After confirmation exactly one
+agreement exists: later receiving requests and simulated payments must reference
+its `agreementId`, and the invoice settles at its **effective total** — the
+authoritative paid/due/overpaid target in the ledger, dashboard, reports, CSV
+and evidence. The owner cannot confirm or change a price for the payer.
 
 ## Reuse a template
 

@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit",
     "build": "npm run typecheck && vite build",
     "test": "tsx --test tests/*.test.ts",
+    "test:cashu": "node --max-old-space-size=512 tests/cashu/run.mjs",
     "test:e2e": "playwright test && playwright test --config tests/hardening-browser.config.ts && npm run test:e2e:accounts && npm run test:e2e:passkeys && npm run test:e2e:connections && npm run test:e2e:saved-connections && npm run test:e2e:marmot && npm run test:e2e:email && npm run test:e2e:business && npm run test:e2e:messages && npm run test:e2e:inbox",
     "test:e2e:core": "playwright test",
     "test:e2e:adversarial": "playwright test --config tests/hardening-browser.config.ts",
@@ -28,6 +29,7 @@
     "test:e2e:inbox": "playwright test --config tests/email-inbox-browser.config.ts"
   },
   "dependencies": {
+    "@cashu/cashu-ts": "4.13.0",
     "@fontsource/dm-sans": "5.3.0",
     "@fontsource/lora": "5.3.0",
     "@internet-privacy/marmot-ts": "0.9.0",
