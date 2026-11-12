@@ -3,6 +3,10 @@
 Private invoices, checkout and client conversations, with self-hosted accounts
 and optional Bitcoin/fiat receiving connections.
 
+[Private saved drafts](docs/INVOICE-DRAFTS.md) preserve unfinished invoice work
+on the server. Reopen drafts, duplicate an earlier invoice, and review carried
+expenses before issuing. Draft saves create no customer checkout or email.
+
 The private pilot includes saved clients, billing snapshots, printable invoices,
 direct Marmot messages and Gmail replies in invoice threads. An optional
 persistent Email gateway lets an explicitly paired owner review and reply to
@@ -59,7 +63,9 @@ its pinned private Hermes worker and native Marmot runtime.
 See the [November Cashu build plan and current limits](docs/NUT-NOVEMBER.md).
 The entry is work in progress. A [Cashu wallet guide](docs/CASHU-WALLET.md) now
 reuses verified Lightning invoices; receipts stay Lightning. Direct ecash
-receiving and redemption remain unimplemented.
+receiving and redemption remain unimplemented. An [internal journal-to-invoice
+settlement boundary](docs/CASHU-INVOICE-INTAKE.md) is fixture-tested, but no native
+merchant wallet, token input or custody is activated.
 
 ## Features and boundaries
 
@@ -85,6 +91,14 @@ recurring drafts keep it. See [invoice controls](docs/INVOICES.md).
 - [Invoice email](docs/INVOICE-EMAIL.md), optional inbox reading, reviewed threaded
   replies and a separately paired Email gateway. Native chat, email submission
   and invoice payment have separate states.
+- [Projects and milestone billing](docs/BILLING-PROJECTS.md): private planning
+  records, existing invoice-editor prefill and invoice-linked delivery URLs.
+  A link appears only after owner release and verified live payment; replacing
+  its destination clears release. See the [workflow guide](docs/MERCHANT-WORKFLOWS.md).
+- [Payment events](docs/INVOICE-EVENTS.md) for accounting automation: encrypted,
+  durable workspace history of new live receipts, authenticated resume cursors
+  and an explicit `events:read` API permission. The read-only MCP tool
+  `list_invoice_events` supports polling; no automatic external webhook is sent.
 - [Encrypted database backup and recovery](docs/SELF-HOSTING.md#backup-and-recovery).
   Browser identity backups require fresh chat membership after restore.
 

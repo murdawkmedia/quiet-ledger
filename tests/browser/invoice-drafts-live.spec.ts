@@ -1,0 +1,71 @@
+import {test,expect} from '@playwright/test';
+import {startMerchantBillingFixture,merchantBillingOwnerToken} from '../merchant-billing-app.js';
+import type {Invoice} from '../../shared/contracts.js';
+
+// Built application, real owner session/CSRF, Express routes and temporary SQLite.
+// All financial figures and identities are fictional. No payment is requested.
+test('saved draft reload, issue and next-month duplicate preserve original records and exclude reviewed expenses',async({page},info)=>{
+  const fixture=await startMerchantBillingFixture(),errors:string[]=[];
+  page.on('pageerror',error=>errors.push(error.message));
+  try{
+    await page.goto(fixture.origin);
+    await page.getByRole('button',{name:'I have an owner token',exact:true}).click();
+    await page.getByLabel('Owner token',{exact:true}).fill(merchantBillingOwnerToken);
+    await page.getByRole('button',{name:'Open private workspace',exact:true}).click();
+    await page.getByRole('link',{name:'Create invoice',exact:true}).first().click();
+    await page.getByLabel('Customer name',{exact:true}).fill('Fictional Monthly Studio');
+    await page.getByLabel('Invoice title',{exact:true}).fill('Fictional first month with travel');
+    await page.getByLabel('Payment schedule',{exact:true}).selectOption('30');
+    await page.getByLabel('Tax rate (%)',{exact:true}).fill('0');
+    await page.getByLabel('Item 1 description',{exact:true}).fill('Fictional monthly services');
+    await page.getByLabel('Item 1 unit price',{exact:true}).fill('1000.00');
+    await page.getByRole('button',{name:'Add line item',exact:true}).click();
+    await page.getByLabel('Item 2 description',{exact:true}).fill('Fictional one-off flight');
+    await page.getByLabel('Item 2 unit price',{exact:true}).fill('400.00');
+    await page.getByLabel('Item 2 type',{exact:true}).selectOption('expense');
+    await page.getByRole('button',{name:'Add method price rule',exact:true}).click();
+    await page.getByLabel('Rule 1 method',{exact:true}).selectOption('bitcoin');
+    await page.getByLabel('Rule 1 discount (%)',{exact:true}).fill('15');
+    await expect(page.getByTestId('draft-save-status-text')).toContainText('Draft saved');
+    await expect(page).toHaveURL(/\/drafts\/[0-9a-f-]{36}$/);
+    const originalDraft=page.url().split('/').at(-1)!;
+    expect((await(await page.request.get(fixture.origin+'/api/invoices')).json()).invoices).toHaveLength(0);
+    await page.reload();
+    await expect(page.getByLabel('Invoice title',{exact:true})).toHaveValue('Fictional first month with travel');
+    await expect(page.getByLabel('Item 2 apply discounts/premiums',{exact:true})).not.toBeChecked();
+    await expect(page.locator('.method-price-preview')).toContainText('1,250.00');
+    await page.getByRole('button',{name:'Create invoice',exact:true}).click();
+    await expect(page.getByRole('heading',{name:'Invoices, kept simple.',exact:true})).toBeVisible();
+    const first:Invoice=(await(await page.request.get(fixture.origin+'/api/invoices')).json()).invoices[0];
+    expect(first.total).toBe(140000);
+    expect(first.methodPricing).toEqual([{method:'bitcoin',discountBps:1500}]);
+    expect(first.items[1]).toMatchObject({kind:'expense',adjustmentEligible:false});
+    const issued=(await(await page.request.get(fixture.origin+'/api/invoice-drafts/'+originalDraft)).json()).draft;
+    expect(issued.status).toBe('issued');expect(issued.invoiceId).toBe(first.id);
+    await page.getByRole('link',{name:'Duplicate',exact:true}).first().click();
+    await expect(page.getByTestId('carried-expense-review')).toBeVisible();
+    await expect(page.getByRole('button',{name:'Create invoice',exact:true})).toBeDisabled();
+    await page.getByRole('button',{name:'Remove carried expenses',exact:true}).click();
+    await expect(page.getByLabel('Item 2 description',{exact:true})).toHaveCount(0);
+    await page.getByLabel('Invoice title',{exact:true}).fill('Fictional next month without travel');
+    await page.getByLabel('Issue date',{exact:true}).fill('2027-03-01');
+    await expect(page.getByText('Due 2027-03-31',{exact:false})).toBeVisible();
+    await expect(page.getByTestId('draft-save-status-text')).toContainText('Draft saved');
+    expect(page.url().split('/').at(-1)).not.toBe(originalDraft);
+    await page.getByRole('button',{name:'Create invoice',exact:true}).click();
+    await expect(page.getByRole('heading',{name:'Invoices, kept simple.',exact:true})).toBeVisible();
+    const invoices:Invoice[]=(await(await page.request.get(fixture.origin+'/api/invoices')).json()).invoices;
+    expect(invoices).toHaveLength(2);
+    expect(invoices.find(row=>row.id===first.id)).toEqual(first);
+    const next=invoices.find(row=>row.id!==first.id)!;
+    expect(next).toMatchObject({total:100000,issueDate:'2027-03-01',dueDate:'2027-03-31',paymentTermDays:30,methodPricing:first.methodPricing});
+    expect(next.items).toHaveLength(1);expect(next.id).not.toBe(first.id);expect(next.token).not.toBe(first.token);
+    await page.setViewportSize({width:390,height:844});
+    await page.goto(fixture.origin+'/drafts');
+    await expect(page.getByTestId('saved-draft-row')).toHaveCount(2);
+    await expect(page.getByTestId('saved-draft-discard')).toHaveCount(0);
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+    await page.screenshot({path:info.outputPath('fictional-monthly-drafts-mobile.png'),fullPage:true});
+    expect(errors).toEqual([]);
+  }finally{await fixture.close();}
+});

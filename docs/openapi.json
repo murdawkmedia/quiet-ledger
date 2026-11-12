@@ -3,7 +3,7 @@
   "info": {
     "title": "Quiet Ledger private API",
     "version": "1.0.0",
-    "description": "Account-scoped API for invoices, receiving and read-only existing BTC/Ark observations. Local mode uses the separate owner workspace. No seed, signing, sending, spending, withdrawal, raw RPC, provider configuration or private scenario endpoints. x-required-scope is enforced by the bearer middleware. Manual confirmation and records export require separately provisioned scopes and have no default MCP tool. See MCP.md for hosted/local key setup, retry semantics and provider acceptance limits."
+    "description": "Account-scoped API for invoices, receiving and read-only existing BTC/Ark observations. Local mode uses the separate owner workspace. No seed, signing, sending, spending, withdrawal, raw RPC, provider configuration or private scenario endpoints. x-required-scope is enforced by the bearer middleware. Manual confirmation and records export require separately provisioned scopes and have no default MCP tool. See MCP.md for hosted/local key setup, retry semantics and provider acceptance limits. Saved editor drafts are owner-browser-session-only and are not exposed by this bearer API; see INVOICE-DRAFTS.md."
   },
   "servers": [
     {
@@ -2268,6 +2268,99 @@
           }
         }
       }
+    },
+    "/invoice-events": {
+      "get": {
+        "operationId": "listInvoiceEvents",
+        "summary": "Read durable live invoice payment events",
+        "description": "Requires a separately granted events:read scope; default and existing keys do not gain it. Includes only new live ledger allocations after enablement and genuine paid transitions, not legacy history or simulation. Persist processed event IDs idempotently and retain nextCursor even when hasMore is false or events is empty. This read does not acknowledge or confirm payment.",
+        "x-required-scope": "events:read",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,512}$"
+            },
+            "description": "Opaque resume cursor from this workspace; omit only for the initial read."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "New live ledger events, ascending by workspace sequence. No customer, bearer link, provider identifier or ecash proof fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvoiceEventPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input or retry key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden resource, method, query or scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited; wait before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Adapter unavailable or not privately configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3775,6 +3868,180 @@
           "effectiveTotal",
           "totalAdjustment"
         ]
+      },
+      "InvoiceEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "seq",
+          "type",
+          "occurredAt",
+          "invoiceId",
+          "total",
+          "effectiveTotal",
+          "currency",
+          "mode"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_[a-f0-9]{32}$"
+          },
+          "seq": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "payment.received",
+              "invoice.paid"
+            ]
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "invoiceId": {
+            "type": "string",
+            "description": "Internal invoice ID, not a checkout or receipt capability."
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "effectiveTotal": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "CAD",
+              "USD",
+              "EUR",
+              "GBP",
+              "KRW",
+              "SAT"
+            ]
+          },
+          "mode": {
+            "type": "string",
+            "const": "live"
+          },
+          "payment": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "amount",
+              "method",
+              "verification"
+            ],
+            "properties": {
+              "amount": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "method": {
+                "type": "string",
+                "description": "Saved ledger payment method; no provider credential or payment identifier.",
+                "enum": [
+                  "bitcoin",
+                  "liquid",
+                  "lightning",
+                  "bank",
+                  "card",
+                  "cash",
+                  "check",
+                  "gift_card",
+                  "coupon",
+                  "apple_pay",
+                  "google_pay",
+                  "cash_app_pay",
+                  "interac",
+                  "ach",
+                  "sepa",
+                  "wire",
+                  "venmo",
+                  "paypal",
+                  "revolut_pay",
+                  "no_charge",
+                  "usdt",
+                  "usdc",
+                  "ideal",
+                  "pay_by_bank",
+                  "stripe_dynamic",
+                  "cashu",
+                  "ark",
+                  "square",
+                  "bank_transfer"
+                ]
+              },
+              "verification": {
+                "type": "string",
+                "enum": [
+                  "provider",
+                  "manual"
+                ]
+              }
+            }
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "payment.received"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "payment"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "payment"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "InvoiceEventPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "events",
+          "nextCursor",
+          "hasMore"
+        ],
+        "properties": {
+          "events": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/InvoiceEvent"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,512}$",
+            "description": "Always present, including empty or caught-up pages. Save and reuse it to poll later events in the same workspace."
+          },
+          "hasMore": {
+            "type": "boolean",
+            "description": "True when another page is available now; false does not invalidate nextCursor."
+          }
+        }
       }
     }
   }

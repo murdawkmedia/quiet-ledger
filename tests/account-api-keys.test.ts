@@ -12,7 +12,7 @@ import type {ApiScope} from '../server/api-access.js';
 const implementation=await import('../server/account-api-keys.js').catch(()=>undefined);
 const ready=()=>{assert.ok(implementation,'Account API key management is not implemented.');return implementation;};
 const defaults:ApiScope[]=['invoices:read','invoices:write','receiving:read','receiving:write','collateral:read'];
-const allScopes:ApiScope[]=[...defaults,'payments:confirm','records:read'];
+const allScopes:ApiScope[]=[...defaults,'payments:confirm','records:read','events:read'];
 const start=Date.parse('2026-11-05T06:00:00.000Z');
 function fixture(path=':memory:'){
   const api=ready(),store=new Store(path,{encryptionKey:Buffer.alloc(32,17)});let time=start;

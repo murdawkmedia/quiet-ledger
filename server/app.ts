@@ -29,8 +29,12 @@ import {ReceivingService,type QuoteReceiving} from './receiving-service.js';
 import {InvoiceLedger} from './invoice-ledger.js';
 import {MethodPriceAgreements} from './method-pricing.js';
 import {invoiceLedgerRouter} from './invoice-ledger-router.js';
+import {invoiceEventsRouter} from './invoice-events-router.js';
 import {recurringDraftsRouter} from './recurring-drafts-router.js';
+import {invoiceDraftsRouter} from './invoice-drafts-router.js';
 import {businessRecordsRouter} from './business-records-router.js';
+import {BillingRecords} from './billing-records.js';
+import {billingRouter} from './billing-router.js';
 import {summarizeInvoiceBalances,CAD_REFERENCE_VALUATION} from '../shared/currency-report.js';
 import {quoteReceiving} from './receiving-quote.js';
 import {inspectCollateral,type CollateralConfig} from '../integrations/collateral.js';
@@ -127,6 +131,9 @@ export function createApp(options: AppOptions) {
   // One shared method-pricing service: receiving, reports, sandbox, demo and ledger
   // projections all read the same protected agreement table.
   const methodPricing=invoiceLedger.agreements;
+  // Owner planning records + paid-gated deliverable links; the same instance supplies
+  // the public checkout projection below.
+  const billing=new BillingRecords(store,invoiceLedger,now);
   const squareSandbox=new SquareSandbox(store,options.squareSandbox,now,methodPricing);
   const paymentReports=new PaymentReports(store,methodPricing);
   const invoiceTemplates=new InvoiceTemplates(store);
@@ -311,7 +318,12 @@ export function createApp(options: AppOptions) {
     const qrDataUrl = pendingPricing?null:await QRCode.toDataURL(requestText, { width: 240, margin: 1, color: { dark: '#163b2d', light: '#ffffff' } });
     res.json({ invoice: publicView(found.invoice), payment: pendingPricing?null:{ mode: 'simulation', amountSats: agreement?.referenceAmountSats??found.invoice.amountSats, request: requestText, qrDataUrl },
       pricingOffers:pendingPricing?methodPricing.offers(found.workspace,found.invoice,checkoutPayable(found.workspace,demo,found.invoice.currency)):[],
-      report:paymentReports.forInvoice(found.invoice.id),adapters:demo?[]:(hosted||found.workspace==='owner')?receivingFor(found.workspace).metadata():[],...(hosted?{conversationAvailable:true}:{}),...(demo?{hackathonDemo:true}:{}), ...(found.invoice.receiptToken ? { receiptToken: found.invoice.receiptToken } : {}) });
+      report:paymentReports.forInvoice(found.invoice.id),adapters:demo?[]:(hosted||found.workspace==='owner')?receivingFor(found.workspace).metadata():[],
+      // Payer-safe deliverable projection: the private checkout token stays the only
+      // public capability; the whitelist is label/url and every gate is re-derived
+      // per request (fail closed for demo/hackathon workspaces).
+      deliverables:billing.publicDeliverables(found.workspace,found.invoice.id),
+      ...(hosted?{conversationAvailable:true}:{}),...(demo?{hackathonDemo:true}:{}), ...(found.invoice.receiptToken ? { receiptToken: found.invoice.receiptToken } : {}) });
   });
   app.post('/api/checkout/:token/method-agreement',sameOrigin,(req,res)=>{
     const checkoutToken=param(req,'token');
@@ -464,8 +476,11 @@ export function createApp(options: AppOptions) {
     let before=Number.MAX_SAFE_INTEGER;if(req.query.cursor!==undefined){const cursor=String(req.query.cursor),decoded=Buffer.from(cursor,'base64url').toString();if(!/^[1-9]\d*$/.test(decoded)||Buffer.from(decoded).toString('base64url')!==cursor)throw new DomainError(400,'Invalid list cursor.');before=Number(decoded);if(!Number.isSafeInteger(before))throw new DomainError(400,'Invalid list cursor.');}return {limit,before};
   }
   app.use('/api',invoiceLedgerRouter(store,invoiceLedger,now));
+  app.use('/api',invoiceEventsRouter(invoiceLedger.events));
   app.use('/api',recurringDraftsRouter(store,now));
+  app.use('/api',invoiceDraftsRouter(store,now));
   app.use('/api/business-records',businessRecordsRouter(store,invoiceLedger));
+  app.use('/api/billing',billingRouter(store,billing,now));
   app.get('/api/invoices', (req, res) => {
     const workspace=(res.locals.session as StoredSession).workspace;
     if(!res.locals.apiAccess)return res.json({invoices:store.listInvoices(workspace).map(invoice=>invoiceLedger.withBalance(invoice,workspace))});

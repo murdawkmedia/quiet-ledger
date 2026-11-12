@@ -94,7 +94,7 @@ async function protocol(api:LedgerApiClient){
   return {client,close:async()=>{await client.close();await server.close();}};
 }
 
-test('real MCP SDK lists twelve annotated tools and executes every fixed API operation',async()=>{
+test('real MCP SDK lists thirteen annotated tools and executes the core fixed API operations',async()=>{
   const calls:{path:string;init:RequestInit}[]=[];
   const api=new LedgerApiClient({token,baseUrl:'http://127.0.0.1:49123',fetcher:async(input,init)=>{
     const url=new URL(String(input));calls.push({path:url.pathname+url.search,init:init??{}});
@@ -103,7 +103,7 @@ test('real MCP SDK lists twelve annotated tools and executes every fixed API ope
   }});
   const p=await protocol(api);
   try{
-    const tools=(await p.client.listTools()).tools;assert.equal(tools.length,12);
+    const tools=(await p.client.listTools()).tools;assert.equal(tools.length,13);
     assert.equal(tools.some(t=>/confirm|send|withdraw|sign|seed|config/.test(t.name)),false);
     assert.equal(tools.find(t=>t.name==='check_receive_request')?.annotations?.readOnlyHint,false);
     assert.equal(tools.find(t=>t.name==='get_collateral')?.annotations?.readOnlyHint,true);
@@ -204,7 +204,7 @@ test('MCP stdio process communicates with SDK Client against a synthetic authent
   let stderr='';transport.stderr?.on('data',chunk=>{stderr+=String(chunk);});
   const client=new Client({name:'stdio-fixture-client',version:'1.0.0'});
   try{
-    await client.connect(transport);assert.equal((await client.listTools()).tools.length,12);
+    await client.connect(transport);assert.equal((await client.listTools()).tools.length,13);
     const output=await client.callTool({name:'list_invoices',arguments:{limit:10}});assert.notEqual(output.isError,true);assert.match(JSON.stringify(output),/QL-0001/);assert.equal(stderr.includes(token),false);
   }finally{await client.close();await new Promise<void>(resolve=>http.close(()=>resolve()));rmSync(dir,{recursive:true,force:true});}
 });
@@ -319,4 +319,41 @@ test('MCP invoice tools pass the confirmed price agreement and effective balance
     assert.deepEqual((ledger.structuredContent as any).balance,balance);
     assert.deepEqual((ledger.structuredContent as any).invoice.priceAgreement,priceAgreement);
   }finally{await p.close();}
+});
+
+test('MCP event feed retains terminal resume cursors and strips nested bearer material',async()=>{
+ const calls:string[]=[];
+ const event={id:'evt_'+ 'a'.repeat(32),seq:1,type:'payment.received',occurredAt:'2026-11-08T12:00:00.000Z',invoiceId:'fictional_invoice',total:1000,effectiveTotal:950,currency:'SAT',mode:'live',payment:{amount:950,method:'cashu',verification:'provider',proof:'private-event-proof'},receiptToken:'private-event-receipt',customerEmail:'private-event-email'};
+ const api=new LedgerApiClient({token,fetcher:async url=>{calls.push(String(url));return Response.json(calls.length===1?{events:[event],nextCursor:'resume_after_one',hasMore:false}:{events:[],nextCursor:'resume_after_one',hasMore:false});}});
+ const p=await protocol(api);
+ try{
+  const listed=(await p.client.listTools()).tools.find(tool=>tool.name==='list_invoice_events');assert.ok(listed);assert.equal(listed.annotations?.readOnlyHint,true);
+  const first=await p.client.callTool({name:'list_invoice_events',arguments:{limit:1}});assert.notEqual(first.isError,true);
+  const data=first.structuredContent as any;assert.equal(data.events[0].effectiveTotal,950);assert.equal(data.nextCursor,'resume_after_one');assert.equal(data.hasMore,false);
+  assert.equal(JSON.stringify(first).includes('private-event-'),false);
+  const empty=await p.client.callTool({name:'list_invoice_events',arguments:{cursor:data.nextCursor,limit:1}});assert.notEqual(empty.isError,true);
+  assert.deepEqual(empty.structuredContent,{events:[],nextCursor:'resume_after_one',hasMore:false});
+  assert.match(calls[1],/\/api\/v1\/invoice-events\?limit=1&cursor=resume_after_one$/);
+ }finally{await p.close();}
+});
+
+test('MCP event feed rejects invalid inputs before HTTP and rejects unsafe event pages',async()=>{
+ let calls=0,payload:unknown={events:[],nextCursor:'resume_zero',hasMore:false};
+ const p=await protocol(new LedgerApiClient({token,fetcher:async()=>{calls++;return Response.json(payload);}}));
+ try{
+  for(const args of [{limit:0},{limit:101},{cursor:'../private'},{workspace:'other'}]){
+   const out=await p.client.callTool({name:'list_invoice_events',arguments:args});assert.equal(out.isError,true);
+  }
+  assert.equal(calls,0);
+  const event={id:'evt_'+ 'b'.repeat(32),seq:1,type:'payment.received',occurredAt:'2026-11-08T12:00:00.000Z',invoiceId:'fictional_invoice',total:1000,effectiveTotal:1000,currency:'SAT',mode:'live',payment:{amount:1000,method:'cashu',verification:'provider'}};
+  for(const bad of [
+   {events:[],nextCursor:null,hasMore:false},
+   {events:[{...event,mode:'simulation'}],nextCursor:'resume_one',hasMore:false},
+   {events:[{...event,payment:{...event.payment,amount:1.5}}],nextCursor:'resume_one',hasMore:false},
+   {events:[event,event],nextCursor:'resume_one',hasMore:false},
+   {events:Array(101).fill(event),nextCursor:'resume_one',hasMore:true},
+  ]){
+   payload=bad;const out=await p.client.callTool({name:'list_invoice_events',arguments:{}});assert.equal(out.isError,true);assert.match(JSON.stringify(out),/invalid_response/);
+  }
+ }finally{await p.close();}
 });

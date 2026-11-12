@@ -54,6 +54,22 @@ async function ownerFixture(page:Page,locked:boolean){
 
 test.beforeEach(async({page})=>{page.on('pageerror',error=>{throw error;});});
 
+test('paid checkout renders distinct deliverables sharing a URL without duplicate keys',async({page})=>{
+ const warnings:string[]=[];
+ page.on('console',message=>{if(message.type()==='error')warnings.push(message.text());});
+ const paidInvoice={...invoice(agreement(),262500),status:'paid'};
+ paidInvoice.balance.state='paid';
+ const url='https://files.fictional.invalid/delivery';
+ await page.route(`**/api/checkout/${token}`,route=>route.fulfill({json:{invoice:paidInvoice,payment:null,deliverables:[{label:'Fictional recording',url},{label:'Fictional transcript',url}],adapters:[]}}));
+ await page.goto('/tests/fixtures/method-pricing-ui.html?view=checkout');
+ const links=page.getByRole('region',{name:'Paid deliverables'}).getByRole('link');
+ await expect(links).toHaveCount(2);
+ await expect(links.nth(0)).toHaveText('Fictional recording');
+ await expect(links.nth(1)).toHaveText('Fictional transcript');
+ await page.waitForLoadState('networkidle');
+ expect(warnings.filter(message=>/same key/.test(message))).toEqual([]);
+});
+
 test('unpriced legacy and demo editors submit unchanged bodies without method rules',async({page})=>{
  const calls=await editor(page,'demo');await expect(page.getByRole('button',{name:'Add method price rule',exact:true})).toHaveCount(0);
  await page.getByRole('button',{name:'Create demo invoice',exact:true}).click();await expect(page.locator('body')).toHaveAttribute('data-created','true');

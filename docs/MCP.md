@@ -1,7 +1,7 @@
 # Private HTTP API and MCP
 
 Quiet Ledger exposes a scoped bearer API at
-`https://quiet-ledger-dyp.pages.dev/api/v1` and twelve stdio MCP tools. Local mode
+`https://quiet-ledger-dyp.pages.dev/api/v1` and thirteen stdio MCP tools. Local mode
 also provides `http://127.0.0.1:4317/api/v1`. Invoice creation, receiving instructions, provider
 readback and observations of existing Bitcoin collateral are supported. Wallet
 and provider choice stays with the user. Adapter mode is explicit; live/mainnet
@@ -300,3 +300,24 @@ otherwise expenses are excluded and services/legacy untyped lines are eligible.
 Discount and premium percentages apply only to that eligible subtotal. Invoice
 readback and statement snapshots preserve explicit choices. Existing issued
 invoice totals are never recomputed from newer template settings.
+
+
+## Payment events for accounting automation
+
+Create a separate account API key with **Read payment events** (`events:read`).
+The default key scopes do not include it. This permission cannot confirm payments,
+issue invoices or send funds. Existing keys keep their saved permissions.
+
+Use `GET /api/v1/invoice-events` or the read-only MCP tool `list_invoice_events`.
+The feed covers new live ledger payments and genuine paid transitions after
+this feature was enabled; it does not backfill historical or simulated records.
+Each event includes an opaque invoice ID, currency, issued/effective totals and
+payment facts. Customer details, checkout/receipt tokens, provider payment IDs,
+proofs and deliverable links are excluded.
+
+Persist each processed event ID and the returned `nextCursor` in your accounting
+workflow. Process duplicates idempotently. While `hasMore` is true, fetch the next
+page; when false, retain the cursor and use it to poll for later events. Empty
+pages also return a resume cursor. Keep cursors private and scoped to the same
+workspace. The feed does not acknowledge financial state or change a payment.
+It sends no automatic webhook and makes no external accounting connection.

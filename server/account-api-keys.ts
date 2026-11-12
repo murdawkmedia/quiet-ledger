@@ -4,7 +4,7 @@ import {z} from 'zod';
 import type {ApiScope} from './api-access.js';
 import {DomainError,Store,hash,type StoredSession} from './store.js';
 
-export const ACCOUNT_API_SCOPES=['invoices:read','invoices:write','receiving:read','receiving:write','collateral:read','payments:confirm','records:read'] as const satisfies readonly ApiScope[];
+export const ACCOUNT_API_SCOPES=['invoices:read','invoices:write','receiving:read','receiving:write','collateral:read','payments:confirm','records:read','events:read'] as const satisfies readonly ApiScope[];
 export const DEFAULT_ACCOUNT_API_SCOPES:readonly ApiScope[]=['invoices:read','invoices:write','receiving:read','receiving:write','collateral:read'];
 const TABLE='account_api_keys';
 const DAY_MS=86400000;

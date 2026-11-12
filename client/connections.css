@@ -13,3 +13,17 @@
 @media(max-width:1150px){.connection-provider-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.connections-intro{flex-wrap:wrap}.connections-intro>.badge{margin-left:77px}.connections-footnote{flex-wrap:wrap;gap:14px}.connections-footnote>.privacy-note{flex-basis:100%}.connections-footnote>.text-link{margin-left:27px}}
 @media(max-width:700px){.connections-intro{padding:21px;gap:14px;align-items:flex-start}.connections-intro-icon{width:42px;height:42px}.connections-intro h2{font-size:20px}.connections-intro p{font-size:12px}.connections-intro>.badge{margin-left:56px;font-size:9px}.connections-empty{margin:0 18px 20px;padding:18px;gap:11px}.saved-connections-list{padding:0 18px 20px}.saved-connection{padding:17px}.saved-connection-top{flex-wrap:wrap;gap:11px}.saved-connection-name{min-width:130px}.saved-connection-top>.badge{margin-left:51px;max-width:calc(100% - 51px)}.connection-provider-grid{grid-template-columns:1fr;padding:0 18px 20px}.connection-provider{padding:20px}.connection-provider-heading .badge{font-size:9px}.connection-form-panel{padding:21px 18px}.connection-form-heading{gap:12px}.connection-form-heading h2{font-size:23px}.connection-form-fields{grid-template-columns:1fr;gap:19px}.connection-form-fields .field:has(textarea){grid-column:auto}.connection-form-actions{align-items:stretch}.connection-form-actions>.button{width:100%;white-space:normal}.connection-form-actions>.button:last-child{order:2}.connection-disconnect-confirm{padding:15px}.connections-page .heading-actions,.connections-page .heading-actions>.button{width:100%}.connections-page .heading-actions>.button{justify-content:center}.connections-footnote>.privacy-note{font-size:11px}}
 @media(max-width:700px){.connections-intro{display:grid;grid-template-columns:42px minmax(0,1fr)}.connections-intro>.badge{grid-column:2;margin-left:0;justify-self:start}}
+.wallet-readiness-panel{margin-bottom:26px}.wallet-readiness-panel>.panel-heading p{max-width:760px;line-height:1.8}
+.wallet-readiness-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;padding:0 26px 26px}
+.wallet-readiness-lane{border:1px solid var(--border);border-radius:10px;padding:20px;min-width:0;background:#fffefb}
+.wallet-readiness-lane-top{display:flex;align-items:flex-start;gap:10px;justify-content:space-between;margin-bottom:15px}
+.wallet-readiness-lane h3{font-size:14px;line-height:1.6;overflow-wrap:anywhere}
+.wallet-readiness-lane-top>.badge{white-space:normal;line-height:1.6;text-align:right;font-size:8px;max-width:130px}
+.wallet-readiness-steps{list-style:none;margin:0;padding:0;display:grid;gap:13px}
+.wallet-readiness-step{display:flex;gap:9px;font-size:11px;line-height:1.7;color:var(--muted);min-width:0}
+.wallet-readiness-copy{min-width:0;overflow-wrap:anywhere}.wallet-readiness-copy strong{font-weight:600}
+.wallet-readiness-state{display:inline-flex;align-items:center;gap:5px;flex-shrink:0;font-weight:600}
+.wallet-readiness-done>.wallet-readiness-state{color:#3f6b3a}.wallet-readiness-attention>.wallet-readiness-state{color:#8a493c}.wallet-readiness-todo>.wallet-readiness-state{color:var(--muted)}
+.wallet-readiness-note{font-size:11px;line-height:1.8;color:var(--muted);margin:0;padding:0 26px 26px}
+@media(max-width:1150px){.wallet-readiness-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:700px){.wallet-readiness-grid{grid-template-columns:1fr;padding:0 18px 20px}.wallet-readiness-note{padding:0 18px 20px}}

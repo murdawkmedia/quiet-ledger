@@ -1,0 +1,14 @@
+/* Saved invoice editor drafts: carried-expense review and autosave status. */
+.draft-review-panel{display:flex;flex-direction:column;gap:.55rem;margin-top:1rem;padding:.9rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--sage);text-align:left}
+.draft-review-panel h3{font-size:.95rem;margin:0}
+.draft-review-panel ul{margin:0;padding-left:1.1rem;display:flex;flex-direction:column;gap:.3rem}
+.draft-review-panel li{display:flex;flex-direction:column;font-size:.85rem}
+.draft-review-ack{display:flex;gap:.5rem;align-items:flex-start;font-size:.85rem}
+.draft-review-panel .muted{font-size:.8rem;margin:0}
+.draft-review-panel .button.full{margin-top:.2rem}
+.saved-draft-list{display:flex;flex-direction:column;gap:.6rem}
+.saved-draft-row{display:flex;align-items:center;justify-content:space-between;gap:.8rem;padding:.8rem .95rem;border:1px solid var(--border);border-radius:var(--radius);flex-wrap:wrap}
+.saved-draft-row-main{display:flex;flex-direction:column}
+.saved-draft-row-main strong{font-size:.95rem}
+.saved-draft-row-main small{color:var(--muted)}
+.saved-draft-row-actions{display:flex;align-items:center;gap:.7rem;flex-wrap:wrap}

@@ -68,6 +68,40 @@ disconnect plus a new setup. There is no OAuth app registration or background
 token-refresh promise; provider credentials still need their required permissions
 and renewal. No provider secret is stored in browser storage or exposed to MCP.
 
+## Wallet readiness
+
+The Connections page shows a read-only **Wallet readiness** overview with four
+lanes: Bitcoin on-chain, Lightning, Ark via Bark and Cashu ecash. Each lane
+moves through four separate phases, and they never collapse into one another:
+
+1. **Saved configuration** — a connection row exists for the lane.
+2. **Metadata check passed** — the latest automatic check on a *live*
+   connection read the provider metadata. It never creates an invoice and
+   never proves a payment. Manual-instruction providers can never pass this
+   phase, and test-mode rows cannot imply mainnet setup.
+3. **Manual confirmation** — a standing obligation: Ark invoice attribution,
+   LNURL/Lightning Address settlement proof (receiver-dependent), and saved
+   receiving instructions all need your independent review, even after a
+   successful metadata check.
+4. **Funded acceptance** — **not recorded by this connection check.** Receive
+   and confirm a real payment yourself through your invoices and receipts. A
+   green connection label is never proof of payment.
+
+The overview derives only from the saved connections and provider metadata
+already shown on this page. It runs no network call and adds no control:
+saving, rechecking and disconnecting stay in the panels above. Legacy
+server-configured adapters are not reflected in the lanes. Mixed results stay
+visible: a verified success never hides a failed row in the same lane, and
+only the matching served method counts — a saved USDT or Liquid instruction
+under the dedicated crypto form does not populate the Bitcoin lane.
+
+Cashu remains native-receiving-unconfigured: there is no Cashu connection form
+here and no seed or token field. Usable today, a payer can pay one of your
+verified Lightning invoices from a Cashu wallet; it settles as Lightning,
+wallet and mint fees vary, and the connection check verifies only the
+Lightning request. Choosing merchant mint custody stays a separate explicit
+decision.
+
 ## Firefox and Bitwarden
 
 Use the Bitwarden Firefox extension, unlock it, enable **Ask to save and use

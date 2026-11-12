@@ -1,0 +1,33 @@
+/* Billing planning screen: owner-only project/milestone records and deliverable links. */
+
+.billing-section{margin-bottom:28px}
+.billing-project{border-top:1px solid rgba(29,31,32,.08);padding:18px 0}
+.billing-project:first-child{border-top:0}
+.billing-project>header{display:flex;flex-wrap:wrap;align-items:center;gap:10px;justify-content:space-between;margin-bottom:8px}
+.billing-project-name{display:flex;flex-wrap:wrap;align-items:center;gap:10px;flex:1;min-width:260px}
+.billing-project-name h3{margin:0}
+.billing-project form{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
+.billing-milestones{list-style:none;margin:8px 0 0;padding:0}
+.billing-milestone{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:12px 0;border-top:1px dashed rgba(29,31,32,.12)}
+.billing-milestone:first-child{border-top:0}
+.billing-milestone-main{flex:1;min-width:240px}
+.billing-milestone-main strong{display:block}
+.billing-milestone-meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:4px;color:rgba(29,31,32,.72);font-size:.9rem}
+.billing-milestone-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.billing-inline-field{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.billing-inline-field input,.billing-inline-field select{min-width:0}
+.billing-amount{font-variant-numeric:tabular-nums}
+.billing-mismatch{color:#8a5a00;font-size:.85rem}
+.billing-deliverables{list-style:none;margin:12px 0 0;padding:0}
+.billing-deliverable{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:12px 0;border-top:1px dashed rgba(29,31,32,.12)}
+.billing-deliverable:first-child{border-top:0}
+.billing-deliverable-main{flex:1;min-width:240px}
+.billing-deliverable-main strong{display:block}
+.billing-deliverable-meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:4px;color:rgba(29,31,32,.72);font-size:.9rem}
+.billing-deliverable-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.billing-forwarded-warning{margin-top:16px}
+
+@media (max-width:720px){
+  .billing-milestone,.billing-deliverable{flex-direction:column;align-items:stretch}
+  .billing-milestone-actions,.billing-deliverable-actions{justify-content:flex-start}
+}

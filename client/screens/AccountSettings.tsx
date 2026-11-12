@@ -15,6 +15,7 @@ const scopeOptions=[
   {id:'collateral:read',label:'Read configured collateral'},
   {id:'payments:confirm',label:'Manually confirm payments',detail:'Can mark a received payment as manually verified. Give this only to a trusted operator.'},
   {id:'records:read',label:'Export workspace records',detail:'Can read the complete invoice, payment and activity export.'},
+  {id:'events:read',label:'Read payment events',detail:'Read new live payment events for accounting automation. Does not confirm payments or send funds.'},
 ] as const;
 type KeyScope=typeof scopeOptions[number]['id'];
 interface AccountApiKey {id:string;label?:string;scopes:KeyScope[];createdAt:string;expiresAt:string;revokedAt?:string}

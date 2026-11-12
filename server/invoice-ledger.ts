@@ -3,6 +3,7 @@ import type {Invoice,Receipt} from '../shared/contracts.js';
 import type {InvoiceBalance,InvoiceLedgerEntry,InvoiceLedgerView} from '../shared/invoice-ledger.js';
 import {DomainError,Store} from './store.js';
 import {MethodPriceAgreements} from './method-pricing.js';
+import {InvoiceEvents} from './invoice-events.js';
 import type {InvoiceMethodAgreement} from '../shared/method-pricing-types.js';
 
 interface StoredEntry extends InvoiceLedgerEntry {receipt?:Receipt;cadEquivalent?:number}
@@ -10,8 +11,10 @@ interface StoredEntry extends InvoiceLedgerEntry {receipt?:Receipt;cadEquivalent
 /** Issued amounts stay in invoices; only new financial events are appended here. */
 export class InvoiceLedger {
  readonly agreements:MethodPriceAgreements;
+ readonly events:InvoiceEvents;
  constructor(private store:Store,agreements?:MethodPriceAgreements){
   this.agreements=agreements??new MethodPriceAgreements(store);
+  this.events=new InvoiceEvents(store);
   store.db.exec(`CREATE TABLE IF NOT EXISTS invoice_ledger_entries (
    id TEXT PRIMARY KEY,workspace TEXT NOT NULL,invoice_id TEXT NOT NULL REFERENCES invoices(id),
    receiving_id TEXT UNIQUE,receipt_token TEXT UNIQUE,data TEXT NOT NULL);
@@ -102,7 +105,19 @@ export class InvoiceLedger {
   });
  }
  payment(workspace:string,invoice:Invoice,receivingId:string,entry:InvoiceLedgerEntry,receipt:Receipt,cadEquivalent?:number){
-  this.append(workspace,invoice,{...entry,receipt,cadEquivalent},receivingId);
+  // The payment transaction itself protects the ledger entry, its receipt and
+  // the durable invoice events: an event storage failure rolls the whole
+  // payment back with a safe 503 and the request stays reconcilable. Nested
+  // calls (for example ReceivingService.commit) reuse the caller's transaction.
+  return this.store.transaction(()=>{
+   if(entry.kind!=='payment')throw new DomainError(400,'Only payment entries are recorded through payment().');
+   if(entry.amount!==receipt.amount||entry.currency!==receipt.currency||entry.method!==receipt.method||entry.currency!==invoice.currency)throw new DomainError(400,'The payment entry, receipt and invoice disagree.');
+   // Simulation receipts stay append-compatible with the existing internal API but emit no events.
+   if(receipt.mode!=='live'){this.append(workspace,invoice,{...entry,receipt,cadEquivalent},receivingId);return;}
+   const before=this.balance(invoice,workspace);
+   this.append(workspace,invoice,{...entry,receipt,cadEquivalent},receivingId);
+   this.events.appendReceipt(workspace,invoice,entry,receipt,before,this.balance(invoice,workspace));
+  });
  }
  receivedCad(invoice:Invoice,workspace:string){return this.all(invoice,workspace).filter(entry=>entry.kind==='payment').reduce((sum,entry)=>sum+(entry.cadEquivalent??0),0);}
  paymentRecords(invoice:Invoice,workspace:string){

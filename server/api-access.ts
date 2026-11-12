@@ -1,14 +1,15 @@
 import {createHash,timingSafeEqual} from 'node:crypto';
 import type {RequestHandler} from 'express';
 
-export type ApiScope='invoices:read'|'invoices:write'|'receiving:read'|'receiving:write'|'collateral:read'|'payments:confirm'|'records:read';
-const SCOPES:readonly ApiScope[]=['invoices:read','invoices:write','receiving:read','receiving:write','collateral:read','payments:confirm','records:read'];
+export type ApiScope='invoices:read'|'invoices:write'|'receiving:read'|'receiving:write'|'collateral:read'|'payments:confirm'|'records:read'|'events:read';
+const SCOPES:readonly ApiScope[]=['invoices:read','invoices:write','receiving:read','receiving:write','collateral:read','payments:confirm','records:read','events:read'];
 export interface ApiAccess {readonly keyId:string;readonly scopes:readonly ApiScope[];readonly version:'v1'|'legacy';readonly workspace?:string;readonly accountId?:string}
 export interface ApiAccessOptions {keys:{token:string;scopes:ApiScope[]}[];resolve?:(token:string)=>{keyId:string;scopes:ApiScope[];workspace:string;accountId:string}|undefined}
 const digest=(token:string)=>createHash('sha256').update(token).digest();
 export const validApiToken=(token:unknown):token is string=>typeof token==='string'&&/^[\x21-\x7e]{32,512}$/.test(token);
 const ID='[A-Za-z0-9_-]{1,128}';
 const resources:{path:RegExp;methods:Partial<Record<string,ApiScope>>;paginated?:boolean}[]=[
+  {path:/^\/invoice-events$/,methods:{GET:'events:read'},paginated:true},
   {path:/^\/payment-methods$/,methods:{GET:'invoices:read'}},
   {path:/^\/invoices$/,methods:{GET:'invoices:read',POST:'invoices:write'},paginated:true},
   {path:new RegExp(`^/invoices/${ID}$`),methods:{GET:'invoices:read'}},

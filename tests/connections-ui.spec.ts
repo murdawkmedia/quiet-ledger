@@ -169,3 +169,101 @@ test('a late list refresh cannot erase a successfully saved connection',async({p
   const response=page.waitForResponse(response=>response.url().endsWith('/api/account/connections')&&response.request().method()==='GET');release();await response;
   await expect(page.getByRole('button',{name:'Refresh list',exact:true})).toBeEnabled();await expect(page.getByText('Verified connection',{exact:true})).toBeVisible();
 });
+
+// Wallet readiness panel: real provider ids and real field shapes, fictional data only. No network, no credentials.
+const readinessProviders=[
+  {id:'bitcoin-core',name:'Fictional Bitcoin node',description:'Fictional synced mainnet node used by the readiness fixture.',
+    fields:[{key:'rpcUrl',label:'Public HTTPS wallet RPC endpoint',type:'url' as const,required:true},{key:'rpcUsername',label:'RPC username',type:'text' as const,required:true},{key:'rpcPassword',label:'RPC password',type:'password' as const,required:true}],
+    walletOptionIds:['bitcoin-core'],modes:['live'] as const,verification:'automatic' as const,methods:['bitcoin'] as const},
+  {id:'lnd',name:'Fictional Lightning node',description:'Fictional LND node used by the readiness fixture.',
+    fields:[{key:'baseUrl',label:'Public HTTPS LND REST endpoint',type:'url' as const,required:true},{key:'macaroonHex',label:'Invoice/read macaroon (hex)',type:'password' as const,required:true}],
+    walletOptionIds:['lnd'],modes:['live'] as const,verification:'automatic' as const,methods:['lightning'] as const},
+  {id:'bark',name:'Fictional Bark server',description:'Fictional Ark server used by the readiness fixture.',
+    fields:[{key:'baseUrl',label:'Public HTTPS Bark origin',type:'url' as const,required:true},{key:'token',label:'Bark API token',type:'password' as const,required:true},{key:'expectedServerPubkey',label:'Pinned Ark server public key',type:'text' as const,required:true},{key:'addressIndex',label:'Existing dedicated address index',type:'text' as const,required:true},{key:'expectedAddress',label:'Existing dedicated Ark address',type:'text' as const,required:true}],
+    walletOptionIds:['ark'],modes:['live'] as const,verification:'automatic' as const,methods:['ark'] as const},
+  {id:'static-crypto',name:'Fictional dedicated crypto instructions',description:'Manual confirmation only; no address pool.',
+    fields:[{key:'method',label:'Asset',type:'select' as const,required:true,options:[{value:'bitcoin',label:'bitcoin'},{value:'usdt',label:'usdt'}]},{key:'address',label:'Dedicated public receive address',type:'text' as const,required:true},{key:'network',label:'Network',type:'select' as const,required:true,options:[{value:'mainnet',label:'mainnet'},{value:'ethereum-mainnet',label:'ethereum-mainnet'}]}],
+    walletOptionIds:['watch-only','manual'],modes:['live','test'] as const,verification:'manual' as const,methods:['bitcoin','usdt'] as const},
+];
+const readinessRow=(overrides:Partial<{id:string;provider:string;label:string;mode:'live'|'test';status:'connected'|'manual'|'unavailable';detail:string;methods:string[];verifiedAt?:string}>&{provider:string;methods:string[]})=>({
+  id:overrides.id??`readiness-${overrides.provider}-${overrides.methods.join('-')}-${overrides.mode??'live'}-${overrides.status??'connected'}`,
+  label:'Fictional readiness connection',mode:'live' as const,status:'connected' as const,
+  detail:'Fictional readiness summary only.',createdAt:'2026-11-01T00:00:00.000Z',...overrides});
+async function serveReadiness(page:Page,connections:ReturnType<typeof readinessRow>[],track:((url:string)=>void)|null=null){
+  await page.route('**/api/**',async route=>{
+    const request=route.request(),path=new URL(request.url()).pathname;
+    track?.(path);
+    if(path.startsWith('/api/account/connections')&&request.method()==='GET'){await route.fulfill({json:{providers:readinessProviders,connections}});return;}
+    await route.fulfill({status:502,json:{error:'Not configured in the readiness fixture'}});
+  });
+  await page.goto('/tests/fixtures/connections-ui.html');
+}
+const laneCard=(page:Page,name:string)=>page.locator('.wallet-readiness-lane').filter({has:page.getByRole('heading',{name,exact:true})});
+
+test('wallet readiness derives four lanes from public data without any new fetch or control',async({page},info)=>{
+  const requested:string[]=[];await serveReadiness(page,[],path=>requested.push(path));
+  const panel=page.getByRole('region',{name:'Wallet readiness'});
+  await expect(panel).toBeVisible();
+  await expect(panel.getByRole('heading',{name:'Bitcoin on-chain',exact:true})).toBeVisible();
+  await expect(panel.getByRole('heading',{name:'Lightning',exact:true})).toBeVisible();
+  await expect(panel.getByRole('heading',{name:'Ark via Bark',exact:true})).toBeVisible();
+  await expect(panel.getByRole('heading',{name:'Cashu ecash',exact:true})).toBeVisible();
+  await expect(panel.getByText('Not recorded by this connection check',{exact:false})).toHaveCount(4);
+  await expect(laneCard(page,'Cashu ecash')).toContainText('not configured in Connections');
+  await expect(laneCard(page,'Cashu ecash')).toContainText('Lightning');
+  await expect(page.locator('.connection-provider',{hasText:'Cashu'})).toHaveCount(0);
+  await expect(panel.getByRole('button')).toHaveCount(0);await expect(panel.getByRole('link')).toHaveCount(0);
+  expect(requested.filter(path=>path.startsWith('/api/')).every(path=>path.startsWith('/api/account/connections'))).toBe(true);
+  const steps=panel.locator('.wallet-readiness-steps');
+  await expect(steps.first()).toBeVisible();
+  expect(await panel.locator('.wallet-readiness-step').count()).toBeGreaterThanOrEqual(4);
+  const order=await panel.evaluate(element=>element.compareDocumentPosition(document.querySelector('.saved-connections-panel')!)&Node.DOCUMENT_POSITION_FOLLOWING);
+  expect(order).toBeTruthy();
+  await page.screenshot({path:info.outputPath('fictional-wallet-readiness-empty.png'),fullPage:true,animations:'disabled'});
+});
+
+test('readiness distinguishes verified LND metadata from automatic invoice checks and funded acceptance',async({page})=>{
+  await serveReadiness(page,[readinessRow({id:'lnd-ok',provider:'lnd',methods:['lightning'],status:'connected',verifiedAt:'2026-11-02T00:00:00.000Z'})]);
+  const lightning=laneCard(page,'Lightning');
+  await expect(lightning).toContainText('Metadata check passed');
+  await expect(lightning.locator('.wallet-readiness-done').filter({hasText:'Metadata check passed'})).toHaveCount(1);
+  await expect(lightning.locator('.wallet-readiness-attention')).toHaveCount(0);
+  await expect(lightning).toContainText('settlement');
+  await expect(lightning.getByText('Not recorded by this connection check',{exact:false})).toHaveCount(1);
+  await expect(page.getByRole('button',{name:'Recheck connection',exact:true})).toBeVisible();
+});
+
+test('a USDT-only static connection and a test-mode Bitcoin row never imply a mainnet Bitcoin lane',async({page})=>{
+  await serveReadiness(page,[
+    readinessRow({id:'usdt-row',provider:'static-crypto',methods:['usdt'],status:'manual',mode:'live'}),
+    readinessRow({id:'test-btc-row',provider:'static-crypto',methods:['bitcoin'],status:'connected',mode:'test',verifiedAt:'2026-11-02T00:00:00.000Z'}),
+  ]);
+  const bitcoin=laneCard(page,'Bitcoin on-chain');
+  await expect(bitcoin).toContainText('Saved · confirmation needed');
+  await expect(bitcoin).not.toContainText('USDT');
+  await expect(bitcoin).not.toContainText('Metadata check passed');
+  await expect(bitcoin.locator('.wallet-readiness-done')).toHaveCount(1);
+  await expect(bitcoin.locator('.wallet-readiness-done')).toContainText('Connection saved');
+  await expect(bitcoin.locator('.wallet-readiness-todo').filter({hasText:'Run a metadata check'})).toHaveCount(1);
+  await expect(page.getByText('Saved instructions · manual confirmation',{exact:true})).toHaveCount(1);
+  await expect(page.locator('.saved-connection',{hasText:'Fictional readiness connection'}).filter({hasText:'· Test'})).toHaveCount(1);
+});
+
+test('a failed row stays visible beside a verified success in the same lane',async({page})=>{
+  await serveReadiness(page,[
+    readinessRow({id:'core-ok',provider:'bitcoin-core',methods:['bitcoin'],status:'connected',verifiedAt:'2026-11-02T00:00:00.000Z'}),
+    readinessRow({id:'core-failed',provider:'bitcoin-core',methods:['bitcoin'],status:'unavailable'}),
+  ]);
+  const bitcoin=laneCard(page,'Bitcoin on-chain');
+  await expect(bitcoin).toContainText('Metadata check passed with failed rows');
+  await expect(bitcoin).toContainText('failed the last check');
+  await expect(bitcoin.locator('.wallet-readiness-attention')).toContainText('Needs your confirmation');
+});
+
+test('readiness state words remain available to assistive technology while icons are decorative',async({page})=>{
+ await serveReadiness(page,[readinessRow({provider:'lnd',methods:['lightning'],status:'connected',verifiedAt:'2026-11-02T00:00:00.000Z'})]);
+ const snapshot=await laneCard(page,'Lightning').ariaSnapshot();
+ expect(snapshot).toContain('Done');expect(snapshot).toContain('To do');
+ const states=laneCard(page,'Lightning').locator('.wallet-readiness-state');
+ for(const state of await states.all())await expect(state).not.toHaveAttribute('aria-hidden','true');
+});

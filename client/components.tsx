@@ -1,8 +1,41 @@
 import { useEffect,useState } from 'react';
 import type { ReactNode } from 'react';
 import { ArrowUpRight,Check,Copy,FileText,LoaderCircle,ShieldCheck,TriangleAlert } from 'lucide-react';
-export function navigate(path:string) { window.history.pushState({},'',path);window.dispatchEvent(new PopStateEvent('popstate'));window.scrollTo({top:0}); }
-export function usePath() { const [path,setPath]=useState(window.location.pathname);useEffect(()=>{const update=()=>setPath(window.location.pathname);window.addEventListener('popstate',update);return()=>window.removeEventListener('popstate',update);},[]);return path; }
+/** Guards block in-app navigation while work is unsaved or an outcome is uncertain. */
+const navigationGuards=new Set<()=>boolean>();
+/** Register a guard; the returned function unregisters it (for component cleanup). */
+export function setNavigationGuard(guard:()=>boolean){navigationGuards.add(guard);return ()=>{navigationGuards.delete(guard);};}
+function guardsAllowNavigation(){for(const guard of navigationGuards)if(!guard())return false;return true;}
+const historyIndexKey='quietLedgerNavigationIndex';
+let acceptedHref:string|undefined,acceptedIndex=0,restoringHistory=false;
+function historyIndex(){const value=window.history.state?.[historyIndexKey];return Number.isSafeInteger(value)?value as number:undefined;}
+function trackHistory(){if(acceptedHref!==undefined)return;acceptedHref=window.location.href;acceptedIndex=historyIndex()??0;window.history.replaceState({...window.history.state,[historyIndexKey]:acceptedIndex},'');}
+/** Update a saved draft's address without leaving its currently mounted editor. */
+export function replaceRoute(path:string){trackHistory();window.history.replaceState({...window.history.state,[historyIndexKey]:acceptedIndex},'',path);acceptedHref=window.location.href;}
+export function navigate(path:string) { trackHistory();if(!guardsAllowNavigation())return;acceptedIndex++;window.history.pushState({[historyIndexKey]:acceptedIndex},'',path);acceptedHref=window.location.href;window.dispatchEvent(new PopStateEvent('popstate'));window.scrollTo({top:0}); }
+export function usePath() {
+  const [path,setPath]=useState(window.location.pathname);
+  useEffect(()=>{
+    trackHistory();
+    const intercept=(event:PopStateEvent)=>{
+      if(restoringHistory){restoringHistory=false;event.stopImmediatePropagation();return;}
+      if(window.location.href===acceptedHref)return;
+      const nextIndex=historyIndex();
+      if(!guardsAllowNavigation()){
+        event.stopImmediatePropagation();
+        if(nextIndex!==undefined&&nextIndex!==acceptedIndex){restoringHistory=true;window.history.go(acceptedIndex-nextIndex);}
+        else window.history.replaceState({...window.history.state,[historyIndexKey]:acceptedIndex},'',acceptedHref);
+        return;
+      }
+      acceptedIndex=nextIndex??acceptedIndex-1;acceptedHref=window.location.href;
+      if(nextIndex===undefined)window.history.replaceState({...window.history.state,[historyIndexKey]:acceptedIndex},'');
+    };
+    const update=()=>setPath(window.location.pathname);
+    window.addEventListener('popstate',intercept,true);window.addEventListener('popstate',update);
+    return()=>{window.removeEventListener('popstate',intercept,true);window.removeEventListener('popstate',update);};
+  },[]);
+  return path;
+}
 export function Link({to,children,className='',...rest}:{to:string;children:ReactNode;className?:string;title?:string;'aria-label'?:string}) { return <a {...rest} href={to} className={className} onClick={event=>{if(!event.metaKey&&!event.ctrlKey&&!event.shiftKey&&event.button===0){event.preventDefault();navigate(to);}}}>{children}</a>; }
 export function Brand({compact=false}:{compact?:boolean}) {return <Link to="/dashboard" className="brand"><span className="brand-mark" aria-hidden="true"><span/><span/><span/></span><span>quiet ledger{compact?null:<small>YOUR MONEY. YOUR RECORDS.</small>}</span></Link>;}
 export function Badge({children,tone='neutral'}:{children:ReactNode;tone?:'neutral'|'good'|'warm'|'ink'}) {return <span className={`badge badge-${tone}`}><i/>{children}</span>;}
