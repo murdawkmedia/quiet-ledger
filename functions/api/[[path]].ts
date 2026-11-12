@@ -3,6 +3,8 @@ const REQUEST_LIMIT=48*1024;
 const RESPONSE_LIMIT=2*1024*1024;
 const DEADLINE_MS=15000;
 const ALLOWED_METHODS=['GET','HEAD','POST','DELETE'];
+const DRAFT_SAVE_PATH=/^\/api\/invoice-drafts\/[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+const allowedMethods=(path:string)=>DRAFT_SAVE_PATH.test(path)?[...ALLOWED_METHODS,'PUT']:ALLOWED_METHODS;
 const REQUEST_HEADERS=['content-type','accept','authorization','cookie','origin','sec-fetch-site','x-csrf-token','idempotency-key'];
 const RESPONSE_HEADERS=['content-type','content-disposition','www-authenticate','retry-after','allow'];
 const UNAVAILABLE='The API is temporarily unavailable.';
@@ -12,7 +14,7 @@ function securityHeaders():Headers {
 }
 function failure(request:Request,status:number,message:string):Response {
   const headers=securityHeaders();headers.set('Content-Type','application/json; charset=utf-8');
-  if(status===405)headers.set('Allow',ALLOWED_METHODS.join(', '));
+  if(status===405)headers.set('Allow',allowedMethods(new URL(request.url).pathname).join(', '));
   return new Response(request.method==='HEAD'?null:JSON.stringify({error:message}),{status,headers});
 }
 function origin(value:unknown):string {
@@ -110,7 +112,7 @@ export async function proxyApi(request:Request,env:ProxyEnvironment,fetcher:type
     cancel(request.body);return failure(request,403,'This API request is not permitted.');
   }
   if(!/^\/api\/[A-Za-z0-9/_-]+$/.test(url.pathname)){cancel(request.body);return failure(request,404,'This API request is not permitted.');}
-  if(!ALLOWED_METHODS.includes(request.method)){cancel(request.body);return failure(request,405,'This API request is not permitted.');}
+  if(!allowedMethods(url.pathname).includes(request.method)){cancel(request.body);return failure(request,405,'This API request is not permitted.');}
   const controller=new AbortController(),abort=()=>controller.abort(),timer=setTimeout(abort,DEADLINE_MS);request.signal.addEventListener('abort',abort,{once:true});if(request.signal.aborted)abort();
   let upstream:Response|undefined;
   try{

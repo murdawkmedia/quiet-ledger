@@ -33,6 +33,25 @@ test('Nostr authentication body bytes including whitespace and Unicode remain ex
   assert.equal(response.status,200);assert.equal(outboundHash,createHash('sha256').update(bytes).digest('hex'));
 });
 
+test('owner draft PUT forwards exact bytes and session/CSRF headers through the hosted gateway',async()=>{
+  const path='/api/invoice-drafts/79010598-a501-42d5-a830-4673985ed829';
+  const body=' {"revision":0,"draft":{"title":"Fictional monthly draft 한글"}}\n';let calls=0;
+  const response=await ready().proxyApi(req(path,{method:'PUT',body,headers:{Origin:env.PUBLIC_ORIGIN,'Sec-Fetch-Site':'same-origin','Content-Type':'application/json',Cookie:'ql_session=fictional-session','X-CSRF-Token':'fictional-csrf'}}),env,stub(async(url,init)=>{
+    calls++;assert.equal(url,env.SHC_API_ORIGIN+path);assert.equal(init.method,'PUT');assert.equal(await new Response(init.body).text(),body);
+    const headers=new Headers(init.headers);assert.equal(headers.get('Cookie'),'ql_session=fictional-session');assert.equal(headers.get('X-CSRF-Token'),'fictional-csrf');assert.equal(headers.get('Origin'),env.PUBLIC_ORIGIN);assert.equal(headers.get('X-Quiet-Ledger-Proxy'),secret);
+    return json({revision:1});
+  }));
+  assert.equal(response.status,200);assert.equal(calls,1);assert.deepEqual(await response.json(),{revision:1});assert.match(response.headers.get('Cache-Control')??'',/no-store/);
+});
+
+test('draft PUT exception remains path-specific and rejects cross-origin saves before forwarding',async()=>{
+  let calls=0;const fetcher=stub(()=>{calls++;return json({});});
+  const path='/api/invoice-drafts/79010598-a501-42d5-a830-4673985ed829';
+  for(const candidate of ['/api/invoice-drafts','/api/invoice-drafts/not-a-uuid',path+'/issue',path+'/',path.replace('/api/','/api/v1/'),'/api/invoices/79010598-a501-42d5-a830-4673985ed829'])await staticFailure(await ready().proxyApi(req(candidate,{method:'PUT',body:'{}'}),env,fetcher),405);
+  for(const headers of [new Headers({Origin:'https://evil.example'}),new Headers({'Sec-Fetch-Site':'cross-site'})])await staticFailure(await ready().proxyApi(req(path,{method:'PUT',body:'{}',headers}),env,fetcher),403);
+  const response=await ready().proxyApi(req(path,{method:'PATCH'}),env,fetcher);await staticFailure(response,405);assert.equal(response.headers.get('Allow'),'GET, HEAD, POST, DELETE, PUT');assert.equal(calls,0);
+});
+
 test('configuration must contain separate canonical HTTPS origins and a private printable secret',async()=>{
   let calls=0;const fetcher=stub(()=>{calls++;return json({});});
   for(const bad of ['', 'http://backend.example','https://user:password@backend.example','https://backend.example/api','https://backend.example?private=yes','https://backend.example#private','https://backend.example/','https://BACKEND.example','https://backend.example:443'])await staticFailure(await ready().proxyApi(req(),{...env,SHC_API_ORIGIN:bad},fetcher),503);
