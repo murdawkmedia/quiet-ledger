@@ -75,11 +75,13 @@ and the currency balance table show its exact whole-satoshi amounts separately.
 ### Method-specific prices
 
 An invoice can also carry per-method price rules (`methodPricing`), for example a
-Lightning discount or a card premium. A rule applies to the same
-adjustment-eligible lines as ordinary discounts/premiums; the issued subtotal,
-tax and total stay immutable. Only the private owner workspace can create a
-method-priced invoice. See [METHOD-PRICING.md](METHOD-PRICING.md) for the full
-contract.
+Lightning discount or a card premium. Each rule applies to the same
+adjustment-eligible lines as ordinary discounts/premiums, or — its own choice —
+to the whole invoice subtotal before tax; the issued subtotal, tax and total
+stay immutable. One all-fiat group rule can cover every fiat-settled method at
+once unless a concrete method rule replaces it. Only the private owner
+workspace can create a method-priced invoice. See
+[METHOD-PRICING.md](METHOD-PRICING.md) for the full contract.
 
 The payer confirms one complete server-computed offer on the public checkout
 (`POST /api/checkout/:token/method-agreement` with the exact `offerHash`) before

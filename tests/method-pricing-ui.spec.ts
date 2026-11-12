@@ -6,8 +6,8 @@ const invoiceId='fictional-priced-invoice';
 const token='fictional-pricing-token';
 const adapters=[{id:'fictional-lightning',label:'Fictional Lightning',mode:'live',configured:true,methods:['lightning'],supportedCurrenciesByMethod:{lightning:['CAD','SAT']}},{id:'fictional-card',label:'Fictional Card',mode:'live',configured:true,methods:['card'],supportedCurrenciesByMethod:{card:['CAD']}}];
 function invoice(agreement?:any,paid=0){return {id:invoiceId,number:'QL-FICTIONAL-PRICING',token,title:'Fictional <img src=x onerror="window.__pricingExecuted=true"> labour',customerName:'Fictional Customer',currency:'CAD',items:[{description:'Fictional labour',quantity:1,unitAmount:200000,kind:'service',adjustmentEligible:true},{description:'Fictional <img src=x onerror="window.__pricingExecuted=true"> flights',quantity:1,unitAmount:80000,kind:'expense',adjustmentEligible:false}],taxBps:500,discountBps:500,discountAmount:10000,premiumAmount:0,subtotal:280000,tax:13500,total:283500,status:'open',createdAt:'2026-11-06T00:00:00Z',acceptedMethods:['lightning','card'],methodPricing:[{method:'lightning',discountBps:1000},{method:'card',premiumBps:200}],priceAgreement:agreement,balance:{total:283500,effectiveTotal:agreement?.effectiveTotal??283500,paid,credited:0,due:Math.max(0,(agreement?.effectiveTotal??283500)-paid),overpaid:0,currency:'CAD',state:'unpaid',mode:'live'}};}
-function offer(method:'lightning'|'card'){const lightning=method==='lightning';return {method,offerHash:(lightning?'a':'b').repeat(64),currency:'CAD',eligibleSubtotal:200000,issuedSubtotal:280000,issuedDiscountAmount:10000,issuedPremiumAmount:0,issuedTax:13500,issuedTotal:283500,discountBps:lightning?1000:0,premiumBps:lightning?0:200,discountAmount:lightning?20000:0,premiumAmount:lightning?0:4000,adjustedSubtotal:lightning?250000:274000,effectiveTax:lightning?12500:13700,taxAdjustment:lightning?-1000:200,effectiveTotal:lightning?262500:287700,totalAdjustment:lightning?-21000:4200,referenceAmountSats:lightning?262500:287700};}
-function agreement(method:'lightning'|'card'='lightning'){return {...offer(method),id:agreementId,invoiceId,confirmedAt:'2026-11-06T01:00:00Z',confirmation:'public_checkout_token'};}
+function offer(method:'lightning'|'card'|'bank'){const lightning=method==='lightning';if(method==='bank')return {method,offerHash:'d'.repeat(64),currency:'CAD',basis:'subtotal',eligibleSubtotal:200000,issuedSubtotal:280000,issuedDiscountAmount:10000,issuedPremiumAmount:0,issuedTax:13500,issuedTotal:283500,discountBps:0,premiumBps:500,discountAmount:0,premiumAmount:14000,adjustedSubtotal:284000,effectiveTax:14200,taxAdjustment:700,effectiveTotal:298200,totalAdjustment:14700,referenceAmountSats:298200};return {method,offerHash:(lightning?'a':'b').repeat(64),currency:'CAD',eligibleSubtotal:200000,issuedSubtotal:280000,issuedDiscountAmount:10000,issuedPremiumAmount:0,issuedTax:13500,issuedTotal:283500,discountBps:lightning?1000:0,premiumBps:lightning?0:200,discountAmount:lightning?20000:0,premiumAmount:lightning?0:4000,adjustedSubtotal:lightning?250000:274000,effectiveTax:lightning?12500:13700,taxAdjustment:lightning?-1000:200,effectiveTotal:lightning?262500:287700,totalAdjustment:lightning?-21000:4200,referenceAmountSats:lightning?262500:287700};}
+function agreement(method:'lightning'|'card'|'bank'='lightning'){return {...offer(method),id:agreementId,invoiceId,confirmedAt:'2026-11-06T01:00:00Z',confirmation:'public_checkout_token'};}
 async function editor(page:Page,view='editor'){
  const calls:Call[]=[];
  await page.route('**/api/clients',route=>route.fulfill({json:{clients:[]}}));
@@ -25,11 +25,11 @@ async function fillLabourAndFlights(page:Page){
 async function acceptLightningAndCard(page:Page){
  const bank=page.getByLabel('Accept Bank transfer',{exact:true});if(await bank.isChecked())await bank.uncheck();const bitcoin=page.getByLabel('Accept Bitcoin',{exact:true});if(await bitcoin.isChecked())await bitcoin.uncheck();const card=page.getByLabel('Accept Card',{exact:true});if(!await card.isChecked())await card.check();
 }
-async function publicFixture(page:Page,options:{locked?:boolean;offers?:boolean;live?:boolean}={}){
+async function publicFixture(page:Page,options:{locked?:boolean;offers?:boolean;live?:boolean;bank?:boolean}={}){
  const state={agreement:options.locked?agreement():undefined,paid:0,calls:[] as Call[],confirmed:[] as Call[]};
  await page.route('**/api/**',async route=>{
   const req=route.request(),path=new URL(req.url()).pathname,body=req.method()==='POST'?req.postDataJSON():undefined;
-  if(path===`/api/checkout/${token}`&&req.method()==='GET'){const awaiting=!state.agreement;return route.fulfill({json:{invoice:invoice(state.agreement,state.paid),payment:awaiting?null:{mode:'simulation',amountSats:state.agreement?.referenceAmountSats??283500,request:'fictional-payment-request'},pricingOffers:awaiting&&options.offers!==false?[offer('lightning'),offer('card')]:[],adapters:options.live===false?[]:adapters}});}
+  if(path===`/api/checkout/${token}`&&req.method()==='GET'){const awaiting=!state.agreement;return route.fulfill({json:{invoice:invoice(state.agreement,state.paid),payment:awaiting?null:{mode:'simulation',amountSats:state.agreement?.referenceAmountSats??283500,request:'fictional-payment-request'},pricingOffers:awaiting&&options.offers!==false?[offer('lightning'),offer('card'),...(options.bank?[offer('bank')]:[])]:[],adapters:options.live===false?[]:adapters}});}
   if(path===`/api/checkout/${token}/method-agreement`){const call={path,body,key:req.headers()['idempotency-key']};state.confirmed.push(call);state.agreement=agreement(body.method);return route.fulfill({status:201,json:{agreement:state.agreement}});}
   if(path===`/api/checkout/${token}/receiving`){state.calls.push({path,body,key:req.headers()['idempotency-key']});state.paid+=body.amount;return route.fulfill({status:201,json:{request:{id:`fictional-request-${state.calls.length}`,token:`fictional-receive-${state.calls.length}`,invoiceId,invoiceNumber:'QL-FICTIONAL-PRICING',method:body.method,adapterId:body.adapterId,agreementId:body.agreementId,amount:body.amount,currency:'CAD',mode:'live',status:'awaiting_payment',createdAt:'2026-11-06T02:00:00Z'}}});}
   if(path===`/api/checkout/${token}/pay`){state.calls.push({path,body,key:req.headers()['idempotency-key']});return route.fulfill({json:{invoice:{...invoice(state.agreement),status:'paid'},alreadyPaid:false}});}
@@ -78,7 +78,7 @@ test('unpriced legacy and demo editors submit unchanged bodies without method ru
 
 test('optional rules use eligible labour, exact tax and accepted-method filtering',async({page})=>{
  const calls=await editor(page);await fillLabourAndFlights(page);await acceptLightningAndCard(page);
- await expect(page.getByText('Method discounts and premiums apply only to adjustment-eligible labour and services; excluded expenses stay in the subtotal and tax.',{exact:true})).toBeVisible();
+ await expect(page.getByText('Each rule applies to adjustment-eligible labour and services, or to the whole invoice subtotal before tax — its own choice. Excluded expenses stay in the subtotal and tax.',{exact:true})).toBeVisible();
  await page.getByRole('button',{name:'Add method price rule',exact:true}).click();await page.getByLabel('Rule 1 method',{exact:true}).selectOption('lightning');await page.getByLabel('Rule 1 discount (%)',{exact:true}).fill('10');
  const preview=page.getByTestId('method-preview-lightning');await expect(preview).toContainText('$200.00');await expect(preview).toContainText('$2,625.00');await expect(preview).toContainText('$125.00');
  await page.getByRole('button',{name:'Add method price rule',exact:true}).click();await page.getByLabel('Rule 2 method',{exact:true}).selectOption('card');await page.getByLabel('Rule 2 premium (%)',{exact:true}).fill('2');await expect(page.getByTestId('method-preview-card')).toContainText('$2,877.00');
@@ -86,6 +86,20 @@ test('optional rules use eligible labour, exact tax and accepted-method filterin
  await page.getByLabel('Template name',{exact:true}).fill('Fictional method template');await page.getByRole('button',{name:'Save as new template',exact:true}).click();
  expect(calls[0].body.draft.methodPricing).toEqual([{method:'lightning',discountBps:1000},{method:'card',premiumBps:200}]);
  await page.getByLabel('Invoice currency',{exact:true}).selectOption('SAT');await expect(page.getByTestId('method-preview-card')).toHaveCount(0);await expect(page.getByLabel('Rule 1 method',{exact:true})).toHaveValue('lightning');await expect(page.getByLabel('Rule 1 method',{exact:true}).locator('option[value="card"]')).toHaveCount(0);await page.getByLabel('Item 1 unit price',{exact:true}).fill('2000');await page.getByLabel('Item 2 unit price',{exact:true}).fill('800');await expect(page.getByTestId('method-preview-lightning')).toBeVisible();
+});
+
+test('a whole-invoice fiat group rule sits beside an eligible-labour rule and drops on SAT',async({page})=>{
+  const calls=await editor(page);await fillLabourAndFlights(page);await acceptLightningAndCard(page);
+  await page.getByLabel('Discount (%)',{exact:true}).fill('0');await page.getByLabel('Tax rate (%)',{exact:true}).fill('0');
+  await page.getByRole('button',{name:'Add method price rule',exact:true}).click();await page.getByLabel('Rule 1 method',{exact:true}).selectOption('lightning');await page.getByLabel('Rule 1 discount (%)',{exact:true}).fill('15');
+  await expect(page.getByTestId('method-preview-lightning')).toContainText('−$300.00');await expect(page.getByTestId('method-preview-lightning')).toContainText('$2,500.00');
+  await page.getByRole('button',{name:'Add method price rule',exact:true}).click();await page.getByLabel('Rule 2 method',{exact:true}).selectOption('fiat');await page.getByLabel('Rule 2 adjustment base',{exact:true}).selectOption('subtotal');await page.getByLabel('Rule 2 premium (%)',{exact:true}).fill('5');
+  const group=page.getByTestId('method-preview-fiat');await expect(group).toContainText('+$140.00');await expect(group).toContainText('$2,940.00');
+  await expect(page.getByText('Covers every accepted fiat-settled method (bank transfer, card, cash, check and similar). Bitcoin, stablecoin and noncash methods are not affected; a concrete method rule replaces this group for that method.')).toBeVisible();
+  await page.getByLabel('Template name',{exact:true}).fill('Fictional fiat group template');await page.getByRole('button',{name:'Save as new template',exact:true}).click();
+  expect(calls[0].body.draft.methodPricing).toEqual([{method:'lightning',discountBps:1500},{method:'fiat',basis:'subtotal',premiumBps:500}]);
+  await page.getByLabel('Invoice currency',{exact:true}).selectOption('SAT');await expect(page.getByTestId('method-preview-fiat')).toHaveCount(0);await expect(page.getByLabel('Rule 2 method',{exact:true})).toHaveCount(0);
+  await expect(page.getByLabel('Rule 1 method',{exact:true}).locator('option[value="fiat"]')).toHaveCount(0);
 });
 
 test('templates and recurring initialDraft preserve rules, dates, terms and line flags',async({page})=>{
@@ -121,6 +135,17 @@ test('payer confirms before first request and reload resumes exact lock and inst
  await page.getByLabel('Payment amount (CAD)',{exact:true}).fill('625.00');await page.getByRole('button',{name:'Continue with live payment',exact:true}).click();await expect.poll(()=>state.calls.length).toBe(1);expect(state.calls[0].body).toEqual({method:'lightning',adapterId:'fictional-lightning',amount:62500,agreementId});
  await page.goto('/tests/fixtures/method-pricing-ui.html?view=checkout');await expect(page.getByText('Lightning price locked',{exact:true})).toBeVisible();await expect(page.getByLabel('Payment amount (CAD)',{exact:true})).toHaveValue('2000.00');await expect(page.getByTestId('checkout-due')).toHaveText('$2,000.00');
  await page.getByRole('button',{name:'Continue with live payment',exact:true}).click();await expect.poll(()=>state.calls.length).toBe(2);expect(state.calls[1].body).toEqual({method:'lightning',adapterId:'fictional-lightning',amount:200000,agreementId});expect(state.calls.every(call=>call.body.method==='lightning'&&call.body.agreementId===agreementId)).toBe(true);
+});
+
+test('checkout labels the whole-invoice fiat basis on offers and the locked agreement',async({page})=>{
+  const state=await publicFixture(page,{bank:true});
+  const bank=page.getByTestId('price-offer-bank');await expect(bank).toContainText('Whole invoice before tax $2,800.00');await expect(bank).toContainText('+$140.00');await expect(bank).toContainText('$2,982.00');
+  await expect(page.getByTestId('price-offer-lightning')).toContainText('Eligible subtotal $2,000.00');
+  await bank.getByRole('button',{name:'Select Bank transfer price',exact:true}).click();
+  await page.getByRole('button',{name:'Confirm Bank transfer at $2,982.00',exact:true}).click();await page.waitForLoadState('networkidle');
+  await expect(page.getByText('Bank transfer price locked',{exact:true})).toBeVisible();
+  await expect(page.getByTestId('agreement-basis')).toHaveText('Whole invoice before tax ($2,800.00)');
+  expect(state.confirmed[0].body).toEqual({method:'bank',offerHash:'d'.repeat(64)});
 });
 
 for(const status of [408,503])test(`public confirmation ${status} retries one frozen body and key without optimistic payment`,async({page})=>{

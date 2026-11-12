@@ -14,6 +14,12 @@ const ownerToken='method-agreement-owner-secret';
 const pricedInput={customerName:'Fictional pricing customer',title:'Fictional method-priced project',currency:'CAD',
   items:[{description:'Fictional labour',quantity:1,unitAmount:200000},{description:'Fictional flights',quantity:1,unitAmount:80000,kind:'expense'}],
   discountBps:500,taxBps:500,methodPricing:[{method:'lightning',discountBps:1000},{method:'card',premiumBps:200}]};
+// Fictional monthly-pilot basis case: 200000 eligible services + 80000 excluded
+// flights, no tax or global adjustments. Bitcoin 15% eligible -> 250000; the
+// all-fiat 5% whole-invoice premium -> 294000 on every settlement-fiat method.
+const groupInput={customerName:'Fictional fiat studio',title:'Fictional monthly pilot',currency:'CAD',
+  items:[{description:'Fictional monthly services',quantity:1,unitAmount:200000},{description:'Fictional excluded flights',quantity:1,unitAmount:80000,kind:'expense'}],
+  taxBps:0,methodPricing:[{method:'lightning',discountBps:1500},{method:'fiat',basis:'subtotal',premiumBps:500}]};
 
 function setup(){
   const dir=mkdtempSync(join(tmpdir(),'ql-method-agreement-')),dbPath=join(dir,'ledger.sqlite');
@@ -25,8 +31,8 @@ async function ownerLogin(app:ReturnType<typeof createApp>){
   const result=await agent.post('/api/session/owner').send({token:ownerToken}).expect(200);
   return {agent,csrf:result.body.csrfToken as string};
 }
-async function createPricedInvoice(app:ReturnType<typeof createApp>,user:Awaited<ReturnType<typeof ownerLogin>>){
-  return (await user.agent.post('/api/invoices').set('X-CSRF-Token',user.csrf).set('Idempotency-Key',randomUUID()).send(pricedInput).expect(201)).body;
+async function createPricedInvoice(app:ReturnType<typeof createApp>,user:Awaited<ReturnType<typeof ownerLogin>>,input:Record<string,unknown>=pricedInput){
+  return (await user.agent.post('/api/invoices').set('X-CSRF-Token',user.csrf).set('Idempotency-Key',randomUUID()).send(input).expect(201)).body;
 }
 function confirm(app:ReturnType<typeof createApp>,token:string,method:string,offerHash:string,key=randomUUID()){
   return request(app).post(`/api/checkout/${token}/method-agreement`).set('Idempotency-Key',key).send({method,offerHash});
@@ -153,5 +159,66 @@ test('priced invoices without a confirmed agreement block payment at the checkou
     const saved=(await user.agent.get(`/api/invoices/${invoice.id}`).expect(200)).body;
     assert.equal(saved.status,'open');
     assert.deepEqual([saved.balance.effectiveTotal,saved.balance.due],[283500,283500]);
+  }finally{s.cleanup();}
+});
+
+test('the all-fiat fallback prices every payable fiat method and one concrete confirmation locks it',async()=>{
+  const s=setup();
+  try{
+    const user=await ownerLogin(s.app),invoice=await createPricedInvoice(s.app,user,groupInput);
+    assert.deepEqual(invoice.methodPricing,[{method:'lightning',discountBps:1500},{method:'fiat',basis:'subtotal',premiumBps:500}]);
+    const checkout=(await request(s.app).get(`/api/checkout/${invoice.token}`).expect(200)).body;
+    const offers=Object.fromEntries(checkout.pricingOffers.map((offer:{method:string})=>[offer.method,offer]));
+    // The group target is never itself an actual payment method.
+    assert.equal(offers.fiat,undefined);
+    // Bitcoin keeps its eligible-basis discount.
+    assert.deepEqual([offers.lightning.discountAmount,offers.lightning.effectiveTotal,offers.lightning.basis],[30000,250000,undefined]);
+    // Every settlement-fiat method, including manual bank/cash/check, gets the same whole-subtotal premium.
+    for(const method of ['bank','card','cash','check','interac','ach','sepa','wire','paypal','stripe_dynamic'])
+      assert.deepEqual([offers[method].premiumAmount,offers[method].effectiveTotal,offers[method].basis],[14000,294000,'subtotal'],method);
+    // Concrete fiat offers are distinct server offers even with equal amounts.
+    assert.notEqual(offers.bank.offerHash,offers.card.offerHash);
+    // Stablecoin, Bitcoin-native methods without a rule and noncash get no fiat fallback.
+    for(const method of ['usdt','usdc','bitcoin','gift_card'])
+      assert.deepEqual([offers[method].premiumAmount,offers[method].effectiveTotal,offers[method].basis,offers[method].totalAdjustment],[0,280000,undefined,0],method);
+    // The group target itself can never be confirmed as a payment rail.
+    assert.equal((await confirm(s.app,invoice.token,'fiat',offers.card.offerHash)).status,400);
+    // A concrete fiat confirmation locks the group price with its basis metadata.
+    const key=randomUUID();
+    const confirmed=await confirm(s.app,invoice.token,'bank',offers.bank.offerHash,key).expect(201);
+    assert.deepEqual([confirmed.body.agreement.method,confirmed.body.agreement.basis,confirmed.body.agreement.effectiveTotal,confirmed.body.agreement.premiumAmount],['bank','subtotal',294000,14000]);
+    assert.equal('invoiceId' in confirmed.body.agreement,false);
+    // Same key and body replay byte-identically; a different body under the saved key conflicts.
+    const replay=await confirm(s.app,invoice.token,'bank',offers.bank.offerHash,key).expect(201);
+    assert.equal(JSON.stringify(replay.body),JSON.stringify(confirmed.body));
+    assert.equal((await confirm(s.app,invoice.token,'card',offers.card.offerHash,key)).status,409);
+    // The locked checkout exposes the basis on the public agreement and no further offers.
+    const locked=(await request(s.app).get(`/api/checkout/${invoice.token}`).expect(200)).body;
+    assert.deepEqual(locked.pricingOffers,[]);
+    assert.deepEqual([locked.invoice.priceAgreement.method,locked.invoice.priceAgreement.basis,locked.invoice.priceAgreement.effectiveTotal],['bank','subtotal',294000]);
+  }finally{s.cleanup();}
+});
+
+test('a concrete fiat rule overrides the all-fiat group for that method only',async()=>{
+  const s=setup();
+  try{
+    const user=await ownerLogin(s.app),invoice=await createPricedInvoice(s.app,user,{...groupInput,methodPricing:[{method:'fiat',basis:'subtotal',premiumBps:500},{method:'card',premiumBps:200}]});
+    const checkout=(await request(s.app).get(`/api/checkout/${invoice.token}`).expect(200)).body;
+    const offers=Object.fromEntries(checkout.pricingOffers.map((offer:{method:string})=>[offer.method,offer]));
+    // Card uses its own eligible-basis rule; bank keeps the whole-subtotal group premium.
+    assert.deepEqual([offers.card.premiumAmount,offers.card.effectiveTotal,offers.card.basis],[4000,284000,undefined]);
+    assert.deepEqual([offers.bank.premiumAmount,offers.bank.effectiveTotal,offers.bank.basis],[14000,294000,'subtotal']);
+  }finally{s.cleanup();}
+});
+
+test('SAT invoices reject the all-fiat group rule before anything is stored',async()=>{
+  const s=setup();
+  try{
+    const user=await ownerLogin(s.app);
+    const rejected=await user.agent.post('/api/invoices').set('X-CSRF-Token',user.csrf).set('Idempotency-Key',randomUUID())
+      .send({...groupInput,currency:'SAT',items:[{description:'Fictional satoshi work',quantity:1,unitAmount:100000}],methodPricing:[{method:'lightning',discountBps:1500},{method:'fiat',basis:'subtotal',premiumBps:500}]});
+    assert.equal(rejected.status,400);
+    assert.match(rejected.body.error,/SAT/);
+    assert.equal((await user.agent.get('/api/invoices').expect(200)).body.invoices.length,0);
   }finally{s.cleanup();}
 });

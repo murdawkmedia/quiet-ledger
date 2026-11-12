@@ -45,6 +45,16 @@ test('snapshot validator is strict, versioned and bounded',()=>{
   assert.equal(validateInvoiceEditorSnapshot({...base,carriedExpenseAck:'not-hex'}).ok,false);
   assert.equal(validateInvoiceEditorSnapshot({...base,carriedExpenseAck:expenseFingerprint(base.lines.filter(line=>line.kind==='expense'))}).ok,true);
   assert.equal(validateInvoiceEditorSnapshot('nope').ok,false);
+  // Optional per-rule adjustment basis: absent stays valid (legacy), the two
+  // documented values are accepted, anything else fails.
+  assert.equal(validateInvoiceEditorSnapshot({...base,methodRules:[{id:'rule-btc',method:'bitcoin',discount:'3',premium:'',basis:'eligible'}]}).ok,true);
+  assert.equal(validateInvoiceEditorSnapshot({...base,methodRules:[{id:'rule-fiat',method:'fiat',discount:'',premium:'5',basis:'subtotal'}]}).ok,true);
+  assert.equal(validateInvoiceEditorSnapshot({...base,methodRules:[{id:'rule-btc',method:'bitcoin',discount:'3',premium:'',basis:'whole'}]}).ok,false);
+  assert.equal(validateInvoiceEditorSnapshot({...base,methodRules:[{id:'rule-btc',method:'bitcoin',discount:'3',premium:'',basis:'eligible',unknown:'x'}]}).ok,false);
+  // The fiat group is a rule target only: valid in a rule row for fiat currencies,
+  // never an accepted payment method, and never valid on a SAT draft.
+  assert.equal(validateInvoiceEditorSnapshot({...base,accepted:['fiat']}).ok,false);
+  assert.equal(validateInvoiceEditorSnapshot({...base,currency:'SAT',methodRules:[{id:'rule-fiat',method:'fiat',discount:'',premium:'5'}]}).ok,false);
 });
 
 test('partial raw snapshots save, list and reload without issuing anything',()=>{

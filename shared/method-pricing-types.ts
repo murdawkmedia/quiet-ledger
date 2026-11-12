@@ -9,10 +9,30 @@ import type {MethodId,PaymentMethod} from './payment-methods.js';
  * SAT invoices are whole satoshis and never carry a CAD reference.
  */
 
+/**
+ * Optional adjustment base for one method rule: `eligible` keeps the exact
+ * legacy eligible-line behaviour (and stays the default when absent), while
+ * `subtotal` applies the rule's own rates to the whole invoice subtotal before
+ * tax. Each rule uses one basis for its own rates.
+ */
+export type MethodPricingBasis='eligible'|'subtotal';
+
+/**
+ * Rule-target identifier for the single `All fiat methods` fallback rule. It is
+ * a recommended-method selector value only: never a payable payment method,
+ * never a member of the concrete canonical payment-method enum, and never
+ * confirmed as a checkout rail.
+ */
+export const FIAT_RULE_TARGET='fiat' as const;
+/** A rule addresses one concrete canonical method or the all-fiat group target. */
+export type MethodPricingRuleTarget=MethodId|typeof FIAT_RULE_TARGET;
+
 /** A single canonical-method price rule stored on the immutable issued invoice. */
 export interface MethodPricingRule {
-  /** Canonical method id only; the square/bank_transfer aliases are rejected. */
-  method:MethodId;
+  /** Canonical method id only (the square/bank_transfer aliases are rejected), or the all-fiat group target. */
+  method:MethodPricingRuleTarget;
+  /** Optional adjustment base; absent keeps the legacy eligible-line base. */
+  basis?:MethodPricingBasis;
   /** Integer basis points 0..10000; at least one rate must be present and nonzero. */
   discountBps?:number;
   premiumBps?:number;
@@ -42,6 +62,8 @@ export interface MethodPriceAmounts {
   effectiveTotal:number;
   /** Signed: effectiveTotal - issuedTotal. */
   totalAdjustment:number;
+  /** The adjustment base actually used by this rule; absent on legacy eligible-line results. */
+  basis?:MethodPricingBasis;
   /** Legacy fixed CAD reference prorated to the effective price; never a fresh FX quote. Absent for SAT. */
   referenceTotalCad?:number;
   /** Legacy demonstration reference prorated to the effective price; the exact total for SAT invoices. */

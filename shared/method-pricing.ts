@@ -1,10 +1,10 @@
 import type {InvoiceItem} from './contracts.js';
-import {METHOD_DEFINITIONS,type MethodId,type PaymentMethod} from './payment-methods.js';
+import {METHOD_DEFINITIONS,methodInfo,type MethodId,type PaymentMethod} from './payment-methods.js';
 import {invoiceAllowsMethod,currencyAllowsMethod} from './invoice-options.js';
-import type {MethodPriceAmounts,MethodPricingContext,MethodPricingInput,MethodPricingRule} from './method-pricing-types.js';
+import {FIAT_RULE_TARGET,type MethodPriceAmounts,type MethodPricingBasis,type MethodPricingContext,type MethodPricingInput,type MethodPricingRule} from './method-pricing-types.js';
 
-/** Upper bound on stored rules: one per canonical method. */
-export const METHOD_PRICING_MAX_RULES = METHOD_DEFINITIONS.length;
+/** Upper bound on stored rules: one per canonical method plus one all-fiat group rule. */
+export const METHOD_PRICING_MAX_RULES = METHOD_DEFINITIONS.length + 1;
 /** The application's existing final-total bound in minor units. */
 const MAX_TOTAL = 1_000_000_000n;
 const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
@@ -39,8 +39,10 @@ function safeInteger(value:bigint,label:string):number{
 /**
  * Strict validation of a persisted/drafted methodPricing array. Absent input
  * returns undefined (legacy invoices keep their issued price). An empty array,
- * aliases, duplicates, unaccepted methods, SAT-incompatible methods, fractional
- * or out-of-range rates, absent or all-zero rates and unknown fields all throw.
+ * aliases, duplicates (including a second all-fiat group rule), unaccepted
+ * methods, SAT-incompatible methods and SAT fiat-group rules, fractional or
+ * out-of-range rates, unknown bases, absent or all-zero rates and unknown
+ * fields all throw.
  */
 export function parseMethodPricingRules(input:unknown,context:MethodPricingContext):MethodPricingRule[]|undefined{
   if(input===undefined)return undefined;
@@ -50,27 +52,53 @@ export function parseMethodPricingRules(input:unknown,context:MethodPricingConte
   for(const entry of input){
     if(!entry||typeof entry!=='object'||Array.isArray(entry))throw new Error('Each method pricing rule must be an object.');
     const record=entry as Record<string,unknown>;
-    for(const key of Object.keys(record))if(!['method','discountBps','premiumBps'].includes(key))throw new Error('Method pricing rules accept only method, discountBps and premiumBps.');
+    for(const key of Object.keys(record))if(!['method','discountBps','premiumBps','basis'].includes(key))throw new Error('Method pricing rules accept only method, basis, discountBps and premiumBps.');
     const method=record.method;
-    if(typeof method!=='string'||!canonical.has(method))throw new Error('Method pricing rules accept canonical payment methods only.');
+    if(typeof method!=='string'||(!canonical.has(method)&&method!==FIAT_RULE_TARGET))throw new Error('Method pricing rules accept canonical payment methods or the all-fiat target only.');
     if(seen.has(method))throw new Error('Select each priced method only once.');
     seen.add(method);
     for(const [,value] of [['discountBps',record.discountBps],['premiumBps',record.premiumBps]] as [string,unknown][])
       if(value!==undefined&&(!Number.isSafeInteger(value)||(value as number)<0||(value as number)>10000))throw new Error('Method adjustment rates must be whole basis points between 0 and 10000.');
     if(record.discountBps===undefined&&record.premiumBps===undefined)throw new Error('A method pricing rule needs a discount or premium rate.');
     if((record.discountBps??0)===0&&(record.premiumBps??0)===0)throw new Error('A method pricing rule needs a nonzero discount or premium rate.');
-    if(!invoiceAllowsMethod({acceptedMethods:context.acceptedMethods},method as PaymentMethod))throw new Error('Priced methods must be accepted for this invoice.');
-    if(!currencyAllowsMethod(context.currency,method as PaymentMethod))throw new Error(`Priced methods must support ${context.currency} invoices.`);
-    rules.push({method:method as MethodId,...(record.discountBps!==undefined?{discountBps:record.discountBps as number}:{}),...(record.premiumBps!==undefined?{premiumBps:record.premiumBps as number}:{})});
+    if(record.basis!==undefined&&record.basis!=='eligible'&&record.basis!=='subtotal')throw new Error('Method pricing rules accept an eligible or subtotal basis only.');
+    if(method===FIAT_RULE_TARGET){
+      // The group is a rule target, not a payment method: it needs no accepted-method
+      // match, but SAT invoices settle outside fiat and reject it outright.
+      if(context.currency==='SAT')throw new Error('The all-fiat rule cannot be used on SAT invoices.');
+    }else{
+      if(!invoiceAllowsMethod({acceptedMethods:context.acceptedMethods},method as PaymentMethod))throw new Error('Priced methods must be accepted for this invoice.');
+      if(!currencyAllowsMethod(context.currency,method as PaymentMethod))throw new Error(`Priced methods must support ${context.currency} invoices.`);
+    }
+    rules.push({method:method as MethodPricingRule['method'],...(record.basis!==undefined?{basis:record.basis as MethodPricingBasis}:{}),...(record.discountBps!==undefined?{discountBps:record.discountBps as number}:{}),...(record.premiumBps!==undefined?{premiumBps:record.premiumBps as number}:{})});
   }
   return rules;
 }
 
 /**
- * Pure method-price calculation from an issued invoice snapshot. The eligible-only
- * method adjustment stacks on the issued global adjustments and tax is computed
- * exactly once on the final adjusted subtotal (never as separately rounded
- * components). Every product and division uses BigInt with round-half-up.
+ * Centralized concrete-rule resolution for one canonical payment method: an
+ * exact concrete rule replaces everything else; otherwise the single all-fiat
+ * group rule covers catalog settlement===fiat methods (manual bank/cash/check
+ * included, never family lookups); every other method keeps its legacy
+ * zero-rate base price. The returned rule always names the concrete method, so
+ * server offers and confirmation use the same resolved rule.
+ */
+export function resolveMethodRule(rules:readonly MethodPricingRule[],method:MethodId):MethodPricingRule&{method:MethodId}{
+  const exact=rules.find(rule=>rule.method===method);
+  if(exact)return {...exact,method};
+  const group=rules.find(rule=>rule.method===FIAT_RULE_TARGET);
+  if(group&&methodInfo(method).settlement==='fiat')
+    return {method,...(group.basis!==undefined?{basis:group.basis}:{}),...(group.discountBps!==undefined?{discountBps:group.discountBps}:{}),...(group.premiumBps!==undefined?{premiumBps:group.premiumBps}:{})};
+  return {method};
+}
+
+/**
+ * Pure method-price calculation from an issued invoice snapshot. A rule's own
+ * rates apply to its selected base — the adjustment-eligible lines (legacy
+ * default) or the whole invoice subtotal before tax — stacking on the issued
+ * global adjustments, and tax is computed exactly once on the final adjusted
+ * subtotal (never as separately rounded components). Every product and division
+ * uses BigInt with round-half-up.
  */
 export function calculateMethodPrice(invoice:MethodPricingInput,rule:MethodPricingRule):MethodPriceAmounts{
   const eligible=eligibleInvoiceSubtotal(invoice.items);
@@ -82,7 +110,10 @@ export function calculateMethodPrice(invoice:MethodPricingInput,rule:MethodPrici
   if(roundHalfUp(eligible*BigInt(invoice.discountBps??0),10000n)!==issuedDiscount||roundHalfUp(eligible*BigInt(invoice.premiumBps??0),10000n)!==issuedPremium)throw new Error('Invoice adjustments do not match their eligible base.');
   if(issuedSubtotal-issuedDiscount+issuedPremium+issuedTax!==issuedTotal)throw new Error('Invoice totals are inconsistent.');
   const discountBps=BigInt(rule.discountBps??0),premiumBps=BigInt(rule.premiumBps??0);
-  const methodDiscount=roundHalfUp(eligible*discountBps,10000n),methodPremium=roundHalfUp(eligible*premiumBps,10000n);
+  // Each rule uses one basis for its own rates: whole-invoice means all line
+  // subtotals before tax; the issued global adjustments keep their eligible base.
+  const base=rule.basis==='subtotal'?issuedSubtotal:eligible;
+  const methodDiscount=roundHalfUp(base*discountBps,10000n),methodPremium=roundHalfUp(base*premiumBps,10000n);
   const issuedAdjusted=issuedSubtotal-issuedDiscount+issuedPremium;
   const adjusted=issuedAdjusted-methodDiscount+methodPremium;
   if(adjusted<0n)throw new Error('The method adjustment exceeds the adjusted invoice subtotal.');
@@ -98,6 +129,7 @@ export function calculateMethodPrice(invoice:MethodPricingInput,rule:MethodPrici
     adjustedSubtotal:safeInteger(adjusted,'adjusted subtotal'),effectiveTax:safeInteger(effectiveTax,'effective tax'),
     taxAdjustment:safeInteger(effectiveTax-issuedTax,'tax adjustment'),effectiveTotal:safeInteger(effectiveTotal,'effective total'),
     totalAdjustment:safeInteger(effectiveTotal-issuedTotal,'total adjustment'),
+    ...(rule.basis!==undefined?{basis:rule.basis}:{}),
   };
   if(invoice.currency==='SAT'){
     // SAT binds exact whole satoshis and never gains a fiat reference.
@@ -113,13 +145,18 @@ export function calculateMethodPrice(invoice:MethodPricingInput,rule:MethodPrici
 /**
  * Fixed canonical serialization covered by the server offer hash: invoice id,
  * canonical method and the complete MethodPriceAmounts in a stable field order,
- * with absent optional references encoded as null.
+ * with absent optional references encoded as null. Legacy v1 serialization is
+ * preserved byte-exactly whenever no basis is present; a rule that carries an
+ * explicit basis (either value) hashes through the versioned v2 form so the
+ * actual adjustment base is bound into every confirmed offer.
  */
 export function canonicalMethodPriceOfferInput(invoiceId:string,method:MethodId,amounts:MethodPriceAmounts):string{
-  return JSON.stringify(['method-price-offer-v1',invoiceId,method,amounts.currency,
+  const fields=[amounts.currency,
     amounts.eligibleSubtotal,amounts.issuedSubtotal,amounts.issuedDiscountAmount,amounts.issuedPremiumAmount,
     amounts.issuedTax,amounts.issuedTotal,amounts.discountBps,amounts.premiumBps,
     amounts.discountAmount,amounts.premiumAmount,amounts.adjustedSubtotal,
     amounts.effectiveTax,amounts.taxAdjustment,amounts.effectiveTotal,amounts.totalAdjustment,
-    amounts.referenceTotalCad??null,amounts.referenceAmountSats??null]);
+    amounts.referenceTotalCad??null,amounts.referenceAmountSats??null];
+  if(amounts.basis===undefined)return JSON.stringify(['method-price-offer-v1',invoiceId,method,...fields]);
+  return JSON.stringify(['method-price-offer-v2',invoiceId,method,amounts.basis,...fields]);
 }

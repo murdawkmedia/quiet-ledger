@@ -8,11 +8,20 @@ fictional providers; it does not establish funded provider acceptance.
 ## Issued totals and eligible lines
 
 An invoice may omit `methodPricing` for the existing behavior, or contain
-optional canonical-method discount/premium rules. A method rule is additional
-to the invoice's ordinary discount and premium; it does not overwrite them.
-Rules use the same adjustment-eligible line base. Excluded expenses remain in
-the issued subtotal and tax, and an explicit `adjustmentEligible` choice
-overrides the line kind.
+optional discount/premium rules. A method rule is additional to the invoice's
+ordinary discount and premium; it does not overwrite them. Each rule carries
+its own optional adjustment base: the default `eligible` base uses the
+adjustment-eligible line base (an explicit `adjustmentEligible` choice
+overrides the line kind), while a `subtotal` base applies that rule's rates to
+the whole invoice subtotal before tax, excluded expenses included. Excluded
+expenses remain in the issued subtotal and tax either way.
+
+A rule targets one canonical method, or the `fiat` group target. The group is
+a rule target, never a payment rail: it covers every catalog method whose
+settlement is fiat — manual bank transfer, card, cash and check included —
+and never Bitcoin, stablecoin or noncash methods. One group rule is allowed
+per invoice, and an exact concrete-method rule replaces the group for that
+method instead of stacking. SAT invoices reject the fiat group rule outright.
 
 The original issued subtotal, tax and total stay immutable. An offer or saved
 agreement separately shows its method-only discount, premium, adjusted
@@ -20,11 +29,15 @@ subtotal, effective tax and effective total. A discount is not a financial
 credit and a premium is not a payment.
 
 The editor calculates previews through the shared pricing function and stores
-rules in the ordinary draft. Saved templates and recurring review retain their
-rules, existing line choices, payment terms and dates. Unsaved currency or
-accepted-method changes remove rules that are no longer compatible; SAT is
-never converted from another currency. Rule fields are absent from legacy
-request bodies until at least one rule is added.
+rules in the ordinary draft. Each rule row chooses its method or the all-fiat
+group and its own adjustment base. Saved templates and recurring review
+retain their rules, existing line choices, payment terms and dates. Unsaved
+currency or accepted-method changes remove rules that are no longer
+compatible; the all-fiat group rule survives accepted-method changes because
+it targets no single rail, and it is removed on SAT, which is never converted
+from another currency. Rule fields are absent from legacy request bodies
+until at least one rule is added, and the legacy default `eligible` basis
+stays absent from the wire.
 
 Method-priced creation is disabled in the fictional hackathon editor for this
 v1 slice. Existing unpriced demo invoices and simulation behavior are
@@ -37,7 +50,11 @@ zero or more `pricingOffers`. While confirmation is pending, `payment` may be
 `null`; the browser does not synthesize a request or use caller-entered prices.
 
 The payer selects one complete server offer, sees its final price, and then
-explicitly confirms it:
+explicitly confirms it. Offer hashes bind the complete server-calculated
+amounts: legacy v1 serialization stays byte-exact for rules without an
+explicit basis, and any rule carrying a basis (either value) hashes through a
+versioned v2 form so the actual adjustment base is bound into every confirmed
+offer:
 
 ```text
 POST /api/checkout/:token/method-agreement

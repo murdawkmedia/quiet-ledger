@@ -2688,9 +2688,9 @@
               "$ref": "#/components/schemas/MethodPricingRule"
             },
             "minItems": 1,
-            "maxItems": 27,
+            "maxItems": 28,
             "uniqueItems": false,
-            "description": "Optional per-method price rules. Only the owner workspace can create priced invoices; each method appears at most once and each rule needs a nonzero discount or premium. The payer must confirm one server-computed offer at the public checkout before any payment; the agreed effective total then becomes the settlement target."
+            "description": "Optional per-method price rules. Only the owner workspace can create priced invoices; each method appears at most once (one extra all-fiat group rule is allowed) and each rule needs a nonzero discount or premium. Each rule prices either its adjustment-eligible lines or the whole invoice subtotal before tax, its own optional basis; the all-fiat group target covers every settlement-fiat method unless a concrete method rule replaces it. The payer must confirm one server-computed offer at the public checkout before any payment; the agreed effective total then becomes the settlement target."
           }
         },
         "required": [
@@ -2931,9 +2931,9 @@
               "$ref": "#/components/schemas/MethodPricingRule"
             },
             "minItems": 1,
-            "maxItems": 27,
+            "maxItems": 28,
             "uniqueItems": false,
-            "description": "Issued per-method price rules, exactly as stored on the invoice."
+            "description": "Issued per-method price rules, exactly as stored on the invoice, including any all-fiat group rule and each rule's optional basis."
           },
           "priceAgreement": {
             "$ref": "#/components/schemas/MethodPriceAgreement"
@@ -3684,21 +3684,30 @@
               "pay_by_bank",
               "stripe_dynamic",
               "cashu",
-              "ark"
+              "ark",
+              "fiat"
             ],
-            "description": "Canonical payment method this rule prices. Client-facing aliases (square, bank_transfer) are rejected."
+            "description": "Canonical payment method this rule prices, or the fiat group target for one all-fiat-methods fallback rule. Client-facing aliases (square, bank_transfer) are rejected."
+          },
+          "basis": {
+            "type": "string",
+            "enum": [
+              "eligible",
+              "subtotal"
+            ],
+            "description": "Optional adjustment base for this rule: eligible (default, adjustment-eligible lines only) or subtotal (the whole invoice subtotal before tax). Absent means eligible."
           },
           "discountBps": {
             "type": "integer",
             "minimum": 0,
             "maximum": 10000,
-            "description": "Optional method-only discount in basis points on the adjustment-eligible subtotal."
+            "description": "Optional method-only discount in basis points on this rule's adjustment base."
           },
           "premiumBps": {
             "type": "integer",
             "minimum": 0,
             "maximum": 10000,
-            "description": "Optional method-only premium in basis points on the adjustment-eligible subtotal."
+            "description": "Optional method-only premium in basis points on this rule's adjustment base."
           }
         },
         "required": [
@@ -3833,6 +3842,14 @@
           "totalAdjustment": {
             "type": "integer",
             "description": "Signed: effectiveTotal minus issuedTotal."
+          },
+          "basis": {
+            "type": "string",
+            "enum": [
+              "eligible",
+              "subtotal"
+            ],
+            "description": "Adjustment base of the confirmed rule: eligible (adjustment-eligible lines) or subtotal (whole invoice subtotal before tax). Absent on legacy agreements without an explicit basis."
           },
           "referenceTotalCad": {
             "type": "integer",

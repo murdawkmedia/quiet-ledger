@@ -1,6 +1,7 @@
 import type {Currency,InvoiceBilling} from './contracts.js';
 import type {MethodId,PaymentMethod} from './payment-methods.js';
 import {PAYMENT_METHOD_IDS} from './payment-methods.js';
+import type {FIAT_RULE_TARGET} from './method-pricing-types.js';
 
 /**
  * Private server-side saved invoice editor drafts.
@@ -16,8 +17,10 @@ export const INVOICE_EDITOR_DRAFTS_LIMITS={drafts:200,lines:40,rules:8,methods:3
 
 export type InvoiceEditorLineKind='service'|'expense';
 export interface InvoiceEditorLine {id:string;description:string;quantity:string;price:string;kind:InvoiceEditorLineKind;adjustmentEligible:boolean}
-/** Raw method-rule editor row; the method may still be unselected while editing. */
-export interface InvoiceEditorRule {id:string;method:MethodId|'';discount:string;premium:string}
+/** Optional per-rule adjustment base in the raw editor row; absent keeps the legacy eligible default. */
+export type InvoiceEditorRuleBasis='eligible'|'subtotal';
+/** Raw method-rule editor row; the method may still be unselected while editing, and the all-fiat group is a rule target only. */
+export interface InvoiceEditorRule {id:string;method:MethodId|typeof FIAT_RULE_TARGET|'';discount:string;premium:string;basis?:InvoiceEditorRuleBasis}
 export type InvoiceEditorSchedule='calendar'|'0'|'30'|'60'|'90'|'custom';
 
 export interface InvoiceEditorSnapshot {
@@ -56,7 +59,10 @@ const METHODS=new Set<string>(PAYMENT_METHOD_IDS);
 const SCHEDULES=new Set<string>(['calendar','0','30','60','90','custom']);
 const KINDS=new Set<string>(['service','expense']);
 const LINE_FIELDS=new Set(['id','description','quantity','price','kind','adjustmentEligible']);
-const RULE_FIELDS=new Set(['id','method','discount','premium']);
+const RULE_FIELDS=new Set(['id','method','discount','premium','basis']);
+/** The all-fiat group is a rule target only, never an accepted payment method. */
+const RULE_TARGETS=new Set<string>([...PAYMENT_METHOD_IDS,'fiat']);
+const RULE_BASES=new Set(['eligible','subtotal']);
 const BILLING_FIELDS:{key:string,max:number}[]=[{key:'sellerName',max:120},{key:'sellerEmail',max:254},{key:'sellerAddress',max:1000},{key:'customerAddress',max:1000},{key:'sellerTaxId',max:80}];
 const REQUIRED=['version','customerName','customerEmail','title','issueDate','dueDate','currency','tax','discount','premium','note','lines','schedule','customDays','paymentTerms','allMethods','accepted','methodRules','clientId','billing','carriedLineIds'];
 const text=(value:unknown,max:number)=>typeof value==='string'&&value.length<=max;
@@ -96,10 +102,12 @@ export function validateInvoiceEditorSnapshot(value:unknown):{ok:true;snapshot:I
     if(!rule||typeof rule!=='object'||Array.isArray(rule))return {ok:false,error:'A saved method rule is invalid.'};
     const entry=rule as Record<string,unknown>;
     for(const key of Object.keys(entry))if(entry[key]!==undefined&&!RULE_FIELDS.has(key))return {ok:false,error:`Unknown saved rule field “${key}”.`};
-    for(const key of RULE_FIELDS)if(entry[key]===undefined)return {ok:false,error:`Missing saved rule field “${key}”.`};
+    for(const key of RULE_FIELDS)if(key!=='basis'&&entry[key]===undefined)return {ok:false,error:`Missing saved rule field “${key}”.`};
     if(!lineId(entry.id)||!numberField(entry.discount)||!numberField(entry.premium))return {ok:false,error:'A saved method rule is out of bounds.'};
-    if(entry.method!==''&&(typeof entry.method!=='string'||!METHODS.has(entry.method)))return {ok:false,error:'Choose a supported payment method for each rule.'};
+    if(entry.method!==''&&(typeof entry.method!=='string'||!RULE_TARGETS.has(entry.method)))return {ok:false,error:'Choose a supported payment method or the all-fiat target for each rule.'};
+    if(entry.basis!==undefined&&(typeof entry.basis!=='string'||!RULE_BASES.has(entry.basis)))return {ok:false,error:'Choose an eligible or whole-invoice basis for each rule.'};
   }
+  if(raw.currency==='SAT'&&raw.methodRules.some(rule=>rule&&typeof rule==='object'&&(rule as Record<string,unknown>).method==='fiat'))return {ok:false,error:'SAT invoices cannot use the all-fiat rule.'};
   if(!raw.billing||typeof raw.billing!=='object'||Array.isArray(raw.billing))return {ok:false,error:'The saved billing details are invalid.'};
   const billing=raw.billing as Record<string,unknown>;
   for(const key of Object.keys(billing))if(billing[key]!==undefined&&!BILLING_FIELDS.some(field=>field.key===key))return {ok:false,error:`Unknown saved billing field “${key}”.`};

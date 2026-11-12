@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { Invoice, Payout, PublicInvoice, Receipt, PaymentMethod } from '../shared/contracts.js';
 import type { InvoiceMethodAgreement, MethodPricingRule } from '../shared/method-pricing-types.js';
+import { FIAT_RULE_TARGET } from '../shared/method-pricing-types.js';
 import { calculateMethodPrice, parseMethodPricingRules, METHOD_PRICING_MAX_RULES } from '../shared/method-pricing.js';
 import { DomainError, Store } from './store.js';
 import {InvoiceLedger} from './invoice-ledger.js';
@@ -53,8 +54,8 @@ export const invoiceSchema = z.object({
   taxBps: z.number().int().min(0).max(10000).optional(),
   note: z.string().trim().max(2000).optional(),
   billing:invoiceBillingSchema.optional(),
-  /** Optional strict per-method price rules; at most one per canonical method, each with a nonzero rate. */
-  methodPricing:z.array(z.object({method:z.enum(METHOD_DEFINITIONS.map(row=>row.id) as [MethodId,...MethodId[]]),discountBps:z.number().int().min(0).max(10000).optional(),premiumBps:z.number().int().min(0).max(10000).optional()}).strict()).min(1).max(METHOD_PRICING_MAX_RULES).optional(),
+  /** Optional strict per-method price rules; at most one per canonical method plus one all-fiat group rule, each with a nonzero rate and an optional eligible/subtotal basis. */
+  methodPricing:z.array(z.object({method:z.enum([...METHOD_DEFINITIONS.map(row=>row.id),FIAT_RULE_TARGET] as [MethodId,...MethodId[],typeof FIAT_RULE_TARGET]),basis:z.enum(['eligible','subtotal']).optional(),discountBps:z.number().int().min(0).max(10000).optional(),premiumBps:z.number().int().min(0).max(10000).optional()}).strict()).min(1).max(METHOD_PRICING_MAX_RULES).optional(),
 }).strict().refine(value=>!value.issueDate||!value.dueDate||value.dueDate>=value.issueDate,'Due date must not precede the issue date.').superRefine((value,context)=>{if(value.paymentTermDays!==undefined&&value.issueDate){try{const due=paymentDueDate(value.issueDate,value.paymentTermDays);if(value.dueDate&&value.dueDate!==due)context.addIssue({code:'custom',message:'Due date does not match the selected payment terms.'});}catch(error){context.addIssue({code:'custom',message:(error as Error).message});}}}).superRefine((value,context)=>{if(value.currency==='SAT'&&value.acceptedMethods?.some(method=>!currencyAllowsMethod('SAT',method)))context.addIssue({code:'custom',message:'SAT invoices accept Bitcoin-native and owner-reviewed noncash methods only.'});})
   .superRefine((value,context)=>{
     // Full strict rule validation shared by invoices, templates and recurring drafts:

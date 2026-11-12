@@ -1,7 +1,7 @@
 import {createHash,randomUUID} from 'node:crypto';
 import {METHOD_DEFINITIONS,type MethodId} from '../shared/payment-methods.js';
-import {calculateMethodPrice,canonicalMethodPriceOfferInput,parseMethodPricingRules} from '../shared/method-pricing.js';
-import type {InvoiceMethodAgreement,MethodPriceAmounts,MethodPriceOffer,MethodPricedInvoice,MethodPricingRule,PublicMethodAgreement} from '../shared/method-pricing-types.js';
+import {calculateMethodPrice,canonicalMethodPriceOfferInput,parseMethodPricingRules,resolveMethodRule} from '../shared/method-pricing.js';
+import {FIAT_RULE_TARGET,type InvoiceMethodAgreement,type MethodPriceAmounts,type MethodPriceOffer,type MethodPricedInvoice,type MethodPricingRule,type PublicMethodAgreement} from '../shared/method-pricing-types.js';
 import {DomainError,Store,hash} from './store.js';
 import {invoiceAllowsMethod,currencyAllowsMethod} from '../shared/invoice-options.js';
 
@@ -127,11 +127,14 @@ export class MethodPriceAgreements {
     if(this.forInvoice(workspace,invoice.id))return [];
     const rules=this.validatedRules(invoice);
     if(!rules.length)return [];
-    const methods=[...rules.map(rule=>rule.method),...METHOD_DEFINITIONS.map(row=>row.id).filter(method=>!rules.some(rule=>rule.method===method))];
+    // Concrete rule methods lead, then every other canonical method; the all-fiat
+    // group target itself is never listed as an actual payable payment method.
+    const concrete=rules.map(rule=>rule.method).filter((method):method is MethodId=>method!==FIAT_RULE_TARGET);
+    const methods=[...concrete,...METHOD_DEFINITIONS.map(row=>row.id).filter(method=>!concrete.includes(method))];
     return methods.filter(method=>invoiceAllowsMethod(invoice,method)&&currencyAllowsMethod(invoice.currency,method)&&payable(method)).map(method=>{
-      const rule=rules.find(rule=>rule.method===method)??{method};
+      const rule=resolveMethodRule(rules,method);
       const amounts=this.price(invoice,rule);
-      return {...amounts,method:rule.method,offerHash:this.offerHash(invoice.id,rule.method,amounts)};
+      return {...amounts,method,offerHash:this.offerHash(invoice.id,method,amounts)};
     });
   }
 
@@ -157,7 +160,9 @@ export class MethodPriceAgreements {
       if(!rules.length)throw new DomainError(400,'This invoice has no method pricing.');
       const method=input.method as MethodId;
       if(!invoiceAllowsMethod(invoice,method)||!currencyAllowsMethod(invoice.currency,method))throw new DomainError(400,'This payment method is not accepted for this invoice.');
-      const rule=rules.find(entry=>entry.method===method)??{method};
+      // Offers and confirmation resolve the same concrete rule: an exact concrete
+      // rule replaces the all-fiat group; unpriced methods keep the base price.
+      const rule=resolveMethodRule(rules,method);
       if(!payable(rule.method))throw new DomainError(409,'This payment method is not currently payable.');
       const amounts=this.price(invoice,rule);
       if(this.offerHash(invoice.id,rule.method,amounts)!==input.offerHash)throw new DomainError(400,'The offer no longer matches this invoice. Reload the checkout.');
@@ -167,6 +172,7 @@ export class MethodPriceAgreements {
         currency:amounts.currency,eligibleSubtotal:amounts.eligibleSubtotal,issuedSubtotal:amounts.issuedSubtotal,issuedDiscountAmount:amounts.issuedDiscountAmount,issuedPremiumAmount:amounts.issuedPremiumAmount,
         issuedTax:amounts.issuedTax,issuedTotal:amounts.issuedTotal,discountBps:amounts.discountBps,premiumBps:amounts.premiumBps,discountAmount:amounts.discountAmount,premiumAmount:amounts.premiumAmount,
         adjustedSubtotal:amounts.adjustedSubtotal,effectiveTax:amounts.effectiveTax,taxAdjustment:amounts.taxAdjustment,effectiveTotal:amounts.effectiveTotal,totalAdjustment:amounts.totalAdjustment,
+        ...(amounts.basis!==undefined?{basis:amounts.basis}:{}),
         ...(amounts.referenceTotalCad!==undefined?{referenceTotalCad:amounts.referenceTotalCad}:{}),...(amounts.referenceAmountSats!==undefined?{referenceAmountSats:amounts.referenceAmountSats}:{})};
       this.store.db.prepare('INSERT INTO invoice_method_agreements(id,workspace,invoice_id,data) VALUES(?,?,?,?)').run(agreement.id,workspace,invoice.id,this.store.encode(agreement,'invoice_method_agreements',agreement.id,workspace));
       // No payer identity is asserted: invoice number, method and minor-unit totals only.
