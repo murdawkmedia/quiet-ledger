@@ -39,7 +39,8 @@ const LANES:LaneSpec[]=[
       :'Use the invoice payment check to verify exact LND settlement.'},
   {walletOptionId:'ark',name:'Ark via Bark',category:'Ark',method:'ark',providerIds:['bark'],
     manualDetail:()=> 'Ark VTXO observations need manual invoice attribution and no address pool is created. The saved Bark connection checks only the pinned server public key and your existing indexed address; confirm the allocation for every payment yourself, even after a successful metadata check.'},
-  {walletOptionId:'cashu',name:'Cashu ecash',category:'Ecash',providerIds:[]},
+  {walletOptionId:'cashu',name:'Cashu ecash',category:'Ecash',method:'cashu',providerIds:['cashu-external'],
+    manualDetail:()=> 'Receive the exact invoice sats as ecash in your wallet — self-hosted or third-party — on the saved mint. Import the ecash and verify it is spendable there, not merely a pasted token, then confirm the receipt yourself in Quiet Ledger. The hosting label never changes the verification level: it stays manual owner confirmation, and payer checks and reports never credit an invoice.'},
 ];
 
 const FUNDED_LABEL='Funded acceptance: not recorded by this connection check';
@@ -67,11 +68,22 @@ export function walletReadinessLanes(input:WalletReadinessInput):WalletLaneReadi
     const metadataVerified=rows.some(entry=>entry.automatic&&entry.connection.status==='connected'&&entry.connection.mode==='live'&&typeof entry.connection.verifiedAt==='string'&&entry.connection.verifiedAt.length>0);
     const active=rows.filter(entry=>entry.connection.status==='connected'||entry.connection.status==='manual');
     const onlyManualActive=active.length>0&&active.every(entry=>!entry.automatic);
-    const requiresManualConfirmation=spec.walletOptionId==='ark'||(spec.walletOptionId==='lightning'&&active.some(entry=>LNURL_FAMILY.includes(entry.connection.provider)))||(spec.walletOptionId==='bitcoin'&&onlyManualActive);
+    const requiresManualConfirmation=spec.walletOptionId==='ark'||(spec.walletOptionId==='lightning'&&active.some(entry=>LNURL_FAMILY.includes(entry.connection.provider)))||(spec.walletOptionId==='bitcoin'&&onlyManualActive)||(spec.walletOptionId==='cashu'&&onlyManualActive);
     const steps:ReadinessStep[]=[];
     if(spec.walletOptionId==='cashu'){
-      steps.push({id:'cashu-setup',phase:'setup',state:'todo',label:'Cashu receiving is not configured in Connections',
-        detail:'Customers can currently pay a verified Lightning invoice from their Cashu wallet. Wallet and mint fees may apply; your receipt records Lightning. Native Cashu receiving needs a merchant wallet setup.'});
+      steps.push({id:'cashu-setup',phase:'setup',state:savedCount>0?'done':'todo',
+        label:savedCount>0?'Connection saved':'Cashu receiving is not configured in Connections',
+        detail:savedCount>0
+          ?`${savedCount} saved external-wallet connection${savedCount===1?'':'s'} hold${savedCount===1?'s':''} the wallet label, approved mint and transfer instructions for this lane.`
+          :'Customers can currently pay a verified Lightning invoice from their Cashu wallet; that receipt stays Lightning. Save an external Cashu wallet connection below to receive ecash manually in your own wallet.'});
+      // External-wallet Cashu has no automatic metadata path at all: saving and
+      // rechecking perform no outbound request, so no step can ever pass here.
+      steps.push({id:'cashu-metadata',phase:'metadata',state:savedCount>0?'attention':'todo',label:'No automatic mint check',
+        detail:'Saving or checking an external Cashu wallet connection performs no outbound request and returns manual status. There is no mint metadata check in this lane, and it never proves a payment.'});
+      if(active.length>0){
+        steps.push({id:'cashu-manual-check',phase:'manual-check',state:'attention',label:'Needs your confirmation',
+          detail:spec.manualDetail?spec.manualDetail([]):'Confirm each payment yourself.'});
+      }
     }else{
       steps.push({id:`${spec.walletOptionId}-setup`,phase:'setup',state:savedCount>0?'done':'todo',label:savedCount>0?'Connection saved':'Save a provider connection',
         detail:savedCount>0?`${savedCount} saved connection row${savedCount===1?'':'s'} ${savedCount===1?'holds':'hold'} the details for this lane.`:'Connect one of this lane\'s providers below to save its receiving details.'});

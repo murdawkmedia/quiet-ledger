@@ -33,9 +33,9 @@ export class Store {
     this.db = new DatabaseSync(path);
     if (path !== ':memory:') chmodSync(path, 0o600);
     this.db.exec(`
+      PRAGMA busy_timeout=5000;
       PRAGMA journal_mode=WAL;
       PRAGMA foreign_keys=ON;
-      PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS invoices (id TEXT PRIMARY KEY, workspace TEXT NOT NULL, token TEXT NOT NULL UNIQUE, data TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS invoice_workspace ON invoices(workspace);

@@ -92,7 +92,7 @@ test('restore write failure never publishes a partial destination database',asyn
 });
 test('CLI reads only existing external private key files and prints bounded metadata',()=>{
   const f=fixture();try{f.store.close();const storagePath=join(f.dir,'storage.key'),backupPath=join(f.dir,'backup.key');writeFileSync(storagePath,storageKey.toString('base64url')+'\n',{mode:0o600});writeFileSync(backupPath,backupKey.toString('base64url')+'\n',{mode:0o600});
-    const env={PATH:process.env.PATH,DATA_DIR:f.dir,BACKUP_DIR:f.outputDir,STORAGE_KEY_FILE:storagePath,BACKUP_KEY_FILE:backupPath};
+    const env={PATH:process.env.PATH,TMPDIR:process.env.TMPDIR,DATA_DIR:f.dir,BACKUP_DIR:f.outputDir,STORAGE_KEY_FILE:storagePath,BACKUP_KEY_FILE:backupPath};
     const run=(command:string,extra:Record<string,string>={})=>spawnSync(process.execPath,['--import','tsx','ops/backup.ts',command],{cwd:resolve('.'),env:{...env,...extra},encoding:'utf8',timeout:15000});
     const created=run('backup');assert.equal(created.status,0,created.stderr);const metadata=JSON.parse(created.stdout);assert.ok(metadata.bytes>0);assert.equal(metadata.file,metadata.file.split('/').at(-1));assert.ok(!created.stdout.includes(storageKey.toString('base64url')));assert.ok(!created.stdout.includes(sentinel));
     const verified=run('verify',{BACKUP_FILE:join(f.outputDir,metadata.file)});assert.equal(verified.status,0,verified.stderr);assert.equal(JSON.parse(verified.stdout).integrity,'ok');

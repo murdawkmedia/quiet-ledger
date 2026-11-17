@@ -4,6 +4,7 @@ import {fork} from 'node:child_process';
 import {createHash,randomUUID} from 'node:crypto';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {join} from 'node:path';
+import {tmpdir} from 'node:os';
 import {Store} from '../server/store.js';
 import {InvoiceLedger} from '../server/invoice-ledger.js';
 import {createInvoice,settleInvoice} from '../server/domain.js';
@@ -149,7 +150,7 @@ test('simulation, credits, voids and legacy records never emit events',async()=>
 });
 
 test('a file database reopens with identical event ids, sequences and cursors',async()=>{
-  const dir=mkdtempSync(join('/tmp/opencode','invoice-events-restart-')),path=join(dir,'fixture.sqlite');
+  const dir=mkdtempSync(join(tmpdir(),'invoice-events-restart-')),path=join(dir,'fixture.sqlite');
   let f=fixture(path);
   try{
     const inv=issue(f.store,WS);
@@ -168,7 +169,7 @@ test('a file database reopens with identical event ids, sequences and cursors',a
 });
 
 test('two service instances on one database credit a verified payment once with contiguous sequences',async()=>{
-  const dir=mkdtempSync(join('/tmp/opencode','invoice-events-multi-')),path=join(dir,'fixture.sqlite');
+  const dir=mkdtempSync(join(tmpdir(),'invoice-events-multi-')),path=join(dir,'fixture.sqlite');
   const first=fixture(path),second=fixture(path);
   try{
     const inv=issue(first.store,WS);
@@ -187,7 +188,7 @@ test('two service instances on one database credit a verified payment once with 
 });
 
 test('independent processes commit one event per verified payment and keep sequences unique',{timeout:60000},async()=>{
-  const dir=mkdtempSync(join('/tmp/opencode','invoice-events-race-')),path=join(dir,'fixture.sqlite');
+  const dir=mkdtempSync(join(tmpdir(),'invoice-events-race-')),path=join(dir,'fixture.sqlite');
   const f=fixture(path);
   const spawn=()=>fork(new URL('./fixtures/invoice-events-worker.ts',import.meta.url),[path],{execArgv:['--import','tsx'],stdio:['ignore','pipe','pipe','ipc']});
   const ready=(child:ReturnType<typeof spawn>)=>new Promise<void>((resolve,reject)=>{child.once('error',reject);child.once('message',message=>{(message as {ready?:boolean}).ready?resolve():reject(new Error('Fixture worker not ready.'));});child.once('exit',code=>{if(code)reject(new Error('Fixture worker exited '+code));});});

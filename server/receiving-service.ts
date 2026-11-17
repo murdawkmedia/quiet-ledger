@@ -8,12 +8,15 @@ import type {ReceivingAdapter,ReceivingContext,ReceivingIntent,ReceivingObservat
 import {Store,DomainError,hash} from './store.js';
 import {InvoiceLedger} from './invoice-ledger.js';
 import {MethodPriceAgreements} from './method-pricing.js';
+import {isCashuSecretShaped} from '../integrations/cashu-external-receiving.js';
 
 export interface ReceivingQuote {expectedAtomic:string;cadEquivalent?:number;source:string;observedAt:string}
 export type QuoteReceiving=(invoice:Invoice,method:MethodId,mode:'live'|'test')=>Promise<ReceivingQuote>;
 interface Stored extends ReceivingRecord {workspace:string;context:ReceivingContext;quote:ReceivingQuote;requestedAmount?:number}
 const keyValid=(key:string|undefined)=>Boolean(key&&/^[A-Za-z0-9._:-]{1,128}$/.test(key));
 const canonicalMethod=(method:PaymentMethod)=>method==='square'?'card':method==='bank_transfer'?'bank':method;
+// A hosting label describes custody; changing it cannot create another transfer.
+const paymentNetwork=(network:string)=>network.startsWith('cashu-external (')?'cashu-external':network;
 function safeIntent(intent:ReceivingIntent|undefined){if(!intent)return undefined;const {providerId,url,request,network,asset,instructions,cashuWalletHandoff,expiresAt}=intent;return {providerId,url,request,network,asset,instructions,...(expiresAt?{expiresAt}:{}),...(cashuWalletHandoff===true?{cashuWalletHandoff:true as const}:{})};}
 export class ReceivingService {
   private active=new Map<string,Promise<Stored>>();private cooldown=new Map<string,number>();private ledger:InvoiceLedger;
@@ -152,10 +155,10 @@ export class ReceivingService {
         const agreement=invoice.methodPricing?.length?this.ledger.agreements.forInvoice(current.workspace,current.invoiceId):undefined;
         if(!agreement||agreement.id!==current.agreementId||canonicalMethod(current.method)!==agreement.method)throw new DomainError(409,'The confirmed method price no longer matches this request.','METHOD_AGREEMENT_MISMATCH');
       }
-      const identity=hash(JSON.stringify([current.intent?.asset??current.currency,current.intent?.network??'fiat',observation.paymentId]));
+      const identity=hash(JSON.stringify([current.intent?.asset??current.currency,paymentNetwork(current.intent?.network??'fiat'),observation.paymentId]));
       const paymentKey=this.store.indexValue('payment',hash(JSON.stringify([current.workspace,current.mode,identity])));
       // Older keys included a connection alias. Read their verified invoice provenance too.
-      if(current.mode==='live'&&this.store.listInvoices(current.workspace).some(item=>this.ledger.paymentRecords(item,current.workspace).some(payment=>payment.mode==='live'&&payment.nativePayment&&hash(JSON.stringify([payment.nativePayment.asset,payment.nativePayment.network,payment.nativePayment.paymentId]))===identity)))throw new DomainError(409,'This payment is already assigned to another receive request.');
+      if(current.mode==='live'&&this.store.listInvoices(current.workspace).some(item=>this.ledger.paymentRecords(item,current.workspace).some(payment=>payment.mode==='live'&&payment.nativePayment&&hash(JSON.stringify([payment.nativePayment.asset,paymentNetwork(payment.nativePayment.network),payment.nativePayment.paymentId]))===identity)))throw new DomainError(409,'This payment is already assigned to another receive request.');
       if(this.store.db.prepare('SELECT id FROM receiving_requests WHERE payment_key=? AND id<>?').get(paymentKey,current.id))throw new DomainError(409,'This payment is already assigned to another receive request.');
       current.status='paid';delete current.reviewReason;const verifiedAt=this.now().toISOString();current.receipt={number:`PAY-${current.id}`,mode:current.mode,method:current.method,amount:current.amount,currency:current.currency,verifiedAt};
       this.save(current,paymentKey);
@@ -199,6 +202,7 @@ export class ReceivingService {
   confirm(id:string,workspace:string,note:string,transactionId:string){
     if(!note.trim()||note.length>1000||!transactionId.trim()||transactionId.length>200)throw new DomainError(400,'A review note and unique received transaction reference are required.');
     const record=this.get(id,workspace);if(!record.intent)throw new DomainError(409,'Receiving intent is not available.');
+    if(record.method==='cashu'&&(isCashuSecretShaped(note)||isCashuSecretShaped(transactionId)))throw new DomainError(400,'Use a nonsecret wallet reference and review note. Never submit ecash tokens, proofs or private keys.');
     const settled=this.commit(record,{status:'paid',amount:record.amount,currency:record.currency,reference:record.id,paymentId:transactionId},'manual');
     return this.view(settled);
   }

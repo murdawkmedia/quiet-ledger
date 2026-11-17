@@ -18,6 +18,7 @@ const inputs:Record<string,Record<string,string>>={
   square:{accessToken:'fictional-token',locationId:'LOCATION123',merchantId:'MERCHANT123',merchantCountry:'CA',currency:'CAD'},
   'bank-instructions':{method:'interac',recipient:'Fictional Merchant',instructions:'Send to billing@example.com. Use the payment reference.'},
   'static-crypto':{method:'usdc',address:'0x'+'12'.repeat(20),network:'ethereum-mainnet'},
+  'cashu-external':{hosting:'Third-party wallet',walletLabel:'Minibits',mint:'https://mint.minibits.cash/Bitcoin',instructions:'FICTIONAL channel: send ecash in the shared Minibits group.'},
 };
 function normalized(provider:string){return normalizeConnection({provider,mode:'live',fields:inputs[provider]},options);}
 
@@ -56,8 +57,9 @@ test('verification uses only metadata/account reads and never creates a financia
       return Response.json(body?.method?{id:body.id,result:data,error:null}:data);
     };
     const result=await mod.verifyConnection(normalized(provider),{...options,fetcher});
-    assert.equal(result.status,['paypal','bank-instructions','static-crypto'].includes(provider)?'manual':'connected',provider);
+    assert.equal(result.status,['paypal','bank-instructions','static-crypto','cashu-external'].includes(provider)?'manual':'connected',provider);
     assert.deepEqual(result.methods,buildConnectionAdapter(normalized(provider),{...options,fetcher}).methods);
+    if(provider==='cashu-external')assert.equal(calls.length,0,'saving an external Cashu wallet performs zero transport calls');
     for(const call of calls){
       if(call.body?.method)assert.ok(['getblockchaininfo','getwalletinfo','getaddressinfo'].includes(call.body.method));
       else if(provider==='paypal')assert.equal(call.url.pathname,'/v1/oauth2/token');
@@ -67,7 +69,7 @@ test('verification uses only metadata/account reads and never creates a financia
   }
 });
 test('definitions expose only implemented receiving rails and strict mode/provider fields',()=>{
-  assert.equal(CONNECTION_PROVIDERS.length,13);assert.equal(new Set(CONNECTION_PROVIDERS.map(row=>row.id)).size,13);
+  assert.equal(CONNECTION_PROVIDERS.length,14);assert.equal(new Set(CONNECTION_PROVIDERS.map(row=>row.id)).size,14);
   for(const provider of Object.keys(inputs)){
     const adapter=buildConnectionAdapter(normalized(provider),options);assert.equal(adapter.id,options.id);assert.equal(adapter.mode,'live');assert.ok(adapter.methods.length);
     assert.throws(()=>normalizeConnection({provider,mode:'live',fields:{...inputs[provider],fetcher:'override'}},options));
@@ -81,6 +83,34 @@ test('bank instructions are payer-facing and always require independent confirma
   const context={requestId:'fictional-request',idempotencyKey:'fictional-retry',mode:'live' as const,method:'interac' as const,amount:1234,currency:'CAD' as const,expectedAtomic:'1234',createdAt:new Date().toISOString(),expiresAt:new Date(Date.now()+3600000).toISOString()};
   const intent=await adapter.create(context);assert.equal(intent.instructions?.find(row=>row.label==='Receiving instructions')?.value,inputs['bank-instructions'].instructions);
   assert.equal((await adapter.check(context,intent)).status,'review');await assert.rejects(()=>adapter.create({...context,currency:'USD'}));
+});
+test('external Cashu wallet connections are live-only manual SAT receiving that refuse tokens',async()=>{
+  const definition=CONNECTION_PROVIDERS.find(row=>row.id==='cashu-external')!;
+  assert.equal(definition.modes.length,1);assert.equal(definition.modes[0],'live');
+  assert.equal(definition.verification,'manual');assert.deepEqual(definition.walletOptionIds,['cashu']);
+  assert.throws(()=>normalizeConnection({provider:'cashu-external',mode:'test',fields:inputs['cashu-external']},options));
+  const adapter=buildConnectionAdapter(normalized('cashu-external'),options);
+  assert.deepEqual(adapter.methods,['cashu']);assert.deepEqual(adapter.supportedCurrencies,['SAT']);assert.equal(adapter.label,undefined);
+  const context={requestId:'fictional-cashu-request',idempotencyKey:'fictional-retry',mode:'live' as const,method:'cashu' as const,amount:21,currency:'SAT' as const,expectedAtomic:'21',createdAt:new Date().toISOString(),expiresAt:new Date(Date.now()+900000).toISOString()};
+  const intent=await adapter.create(context);
+  assert.equal(intent.allocationKey,'cashu-external:fictional-cashu-request');
+  assert.ok(intent.instructions!.some(row=>row.value===inputs['cashu-external'].mint));
+  assert.ok(intent.instructions!.some(row=>row.label==='Wallet hosting'&&row.value.startsWith('Third-party wallet')),'hosting label is saved payer-facing configuration');
+  assert.equal((await adapter.check(context,intent)).status,'review');
+  // Both hosting choices normalize and settle identically apart from the label.
+  const selfHosted=buildConnectionAdapter(normalizeConnection({provider:'cashu-external',mode:'live',fields:{...inputs['cashu-external'],hosting:'Self-hosted wallet (user-run)'}},options),options);
+  const selfIntent=await selfHosted.create(context);
+  assert.equal(selfIntent.network,'cashu-external (Self-hosted wallet (user-run))');
+  assert.equal(selfIntent.allocationKey,intent.allocationKey,'reference binds to the request, not the hosting choice');
+  assert.equal((await selfHosted.check(context,selfIntent)).status,'review','self-hosted label never raises the verification level');
+  // Field-level and alias-level refusal of token/secret-shaped values.
+  for(const bad of ['cashuAeyJ0aXRsZSI6ImZpeHR1cmUifQ','cashuB'+('q'.repeat(60)),'nsec1fictionalsecretvalue123456','xprv9s21ZrQH143K3QTtr4AtLibhK4bFjqM5o'+''.padEnd(30,'x')])
+    assert.throws(()=>normalizeConnection({provider:'cashu-external',mode:'live',fields:{...inputs['cashu-external'],instructions:bad}},options),/Invalid connection settings/,bad.slice(0,16));
+  assert.throws(()=>normalizeConnection({provider:'cashu-external',mode:'live',fields:{...inputs['cashu-external'],hosting:'Automatic receiver'}},options));
+  assert.throws(()=>normalizeConnection({provider:'cashu-external',mode:'live',fields:{...inputs['cashu-external'],walletLabel:'Fake wallet'}},options));
+  assert.throws(()=>normalizeConnection({provider:'cashu-external',mode:'live',fields:{...inputs['cashu-external'],mint:'https://mint.attacker.example'}},options));
+  assert.throws(()=>normalizeConnection({provider:'cashu-external',mode:'live',fields:{...inputs['cashu-external'],instructions:''}},options));
+  assert.throws(()=>normalizeConnection({provider:'cashu-external',mode:'live',label:'x'.repeat(81),fields:inputs['cashu-external']},options));
 });
 test('verification rejects mismatched account, chain, address and LNURL callback without leaking responses',async()=>{
   const {verifyConnection}=await import('../server/connection-providers.js') as any;

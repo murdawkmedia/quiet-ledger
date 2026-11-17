@@ -8,6 +8,15 @@ This is work in progress. The existing Cashu checkout is a simulation, not token
 redemption. No real Cashu receiving, minting, swapping or melting is implemented
 in this baseline. Keep that distinction when evaluating the demo.
 
+Since November 15, SAT invoices can also be settled through manual
+[external-wallet Cashu receiving](CASHU-EXTERNAL-WALLET.md): the owner chooses
+self-hosted or third-party wallet hosting, saves a wallet label, one approved
+mint and nonsecret transfer instructions, the payer sends ecash entirely
+outside the app, and the owner's explicit confirmation records one Cashu
+receipt. Both hosting choices share the same manual verification level. That
+path performs no network request, holds no tokens or secrets, and claims no
+funded acceptance; direct token settlement stays unimplemented.
+
 ## What exists at entry
 
 The application was built during November 2026. Implementation began November 4;

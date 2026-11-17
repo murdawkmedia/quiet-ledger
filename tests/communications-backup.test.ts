@@ -124,7 +124,7 @@ test('restore CLI reports the final database hash and the independent encrypted 
   const archive=await createEncryptedBackup({dbPath:f.dbPath,outputDir:f.outputDir,storageKey,backupKey});
   const storagePath=join(f.dir,'storage.key'),backupPath=join(f.dir,'backup.key'),outputPath=join(f.dir,'cli-restored.sqlite');
   writeFileSync(storagePath,storageKey.toString('base64url'),{mode:0o600});writeFileSync(backupPath,backupKey.toString('base64url'),{mode:0o600});
-  const result=spawnSync(process.execPath,['--import','tsx','ops/backup.ts','restore',archive.file],{cwd:process.cwd(),env:{PATH:process.env.PATH,STORAGE_KEY_FILE:storagePath,BACKUP_KEY_FILE:backupPath,RESTORE_DB_PATH:outputPath},encoding:'utf8',timeout:15000});
+  const result=spawnSync(process.execPath,['--import','tsx','ops/backup.ts','restore',archive.file],{cwd:process.cwd(),env:{PATH:process.env.PATH,TMPDIR:process.env.TMPDIR,STORAGE_KEY_FILE:storagePath,BACKUP_KEY_FILE:backupPath,RESTORE_DB_PATH:outputPath},encoding:'utf8',timeout:15000});
   assert.equal(result.status,0,result.stderr);const metadata=JSON.parse(result.stdout);
   assert.equal(metadata.integrity,'ok');assert.equal(metadata.communicationsReset,true);assert.equal(metadata.sha256,digest(readFileSync(outputPath)));assert.equal(metadata.bytes,statSync(outputPath).size);assert.equal(metadata.archiveSha256,archive.sha256);
   assert.equal(result.stdout.includes(f.dir),false);assert.equal(result.stdout.includes(storageKey.toString('base64url')),false);

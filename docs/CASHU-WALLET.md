@@ -49,6 +49,13 @@ not been qualified with a funded independently operated Cashu wallet/mint. It
 implements no direct ecash receiving, minting, swapping, melting or token storage.
 The [November plan](NUT-NOVEMBER.md) keeps direct ecash as a separate future design.
 
+Direct ecash *settlement* remains out of scope, but SAT invoices can now also be
+settled by manual external-wallet Cashu receiving with a self-hosted or
+third-party wallet choice: see
+[Cashu external wallet receiving](CASHU-EXTERNAL-WALLET.md). That path records a
+Cashu receipt from your explicit owner confirmation and never touches tokens or
+the mint; this Lightning handoff guide is unchanged and stays the fallback.
+
 Operators with a separately prepared receive journal can use the offline
 [Cashu recovery tooling](CASHU-RECOVERY.md) to inspect one operation, ask the
 mint for the already-persisted blinded outputs (NUT-09), check input state

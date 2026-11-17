@@ -5,6 +5,7 @@ import {createLnurlAdapter} from '../integrations/lnurl-receiving.js';
 import {createArkAdapter} from '../integrations/ark-receiving.js';
 import {createFiatAdapter} from '../integrations/fiat-receiving.js';
 import {createSquareReceivingAdapter,verifySquareReceivingConnection,type SquareReceivingConfig} from '../integrations/square-receiving.js';
+import {createCashuExternalReceivingAdapter,isCashuSecretShaped,CASHU_EXTERNAL_MINTS,CASHU_EXTERNAL_WALLET_LABELS,CASHU_EXTERNAL_HOSTING_LABELS,type CashuExternalMint,type CashuExternalWalletLabel,type CashuExternalHosting} from '../integrations/cashu-external-receiving.js';
 import type {HttpFetch} from '../integrations/http.js';
 import type {ConnectionProviderDefinition,ConnectionProviderField} from '../shared/connections.js';
 import type {ReceivingAdapter,ReceivingContext} from '../shared/receiving.js';
@@ -30,6 +31,7 @@ export const CONNECTION_PROVIDERS:ConnectionProviderDefinition[]=[
   {id:'square',name:'Square',description:'Hosted card checkout and exact order/payment readback. Connecting only reads location identity and card-processing capability; no payment is created or captured.',fields:[field('accessToken','Square access token','password'),field('locationId','Square location ID'),field('merchantId','Square merchant ID'),country,choice('currency','Location currency',['CAD','USD','EUR','GBP'])],walletOptionIds:['square'],modes:['live','test'],verification:'automatic',methods:['card']},
   {id:'bank-instructions',name:'Bank / Interac / Wise instructions',description:`${manualWarning} Suitable for eligible Wise, Tangerine or other bank receiving details.`,fields:[choice('method','Receiving method',['bank','interac','wire','ach','sepa']),field('recipient','Payee / recipient name'),field('instructions','Receiving instructions','textarea','These instructions are shown to the payer. Include the bank details or Interac address you intend to share; never a password, PIN or private key.')],walletOptionIds:['manual-fiat'],modes:['live','test'],verification:'manual',methods:['bank','interac','wire','ach','sepa']},
   {id:'static-crypto',name:'Dedicated crypto receiving instructions',description:'Manual confirmation only. A saved address is a single dedicated allocation, not an address pool; reuse across requests is blocked.',fields:[choice('method','Asset',['bitcoin','liquid','usdt','usdc']),field('address','Dedicated public receive address'),choice('network','Network',['mainnet','liquid','ethereum-mainnet','testnet','liquidtestnet','ethereum-sepolia'])],walletOptionIds:['watch-only','manual'],modes:['live','test'],verification:'manual',methods:['bitcoin','liquid','usdt','usdc']},
+  {id:'cashu-external',name:'Cashu external wallet',description:'Manual ecash receiving in your existing wallet — self-hosted or third-party — on one approved mint. Saving performs no network request; the app never holds tokens, seeds or proofs and never calls the mint.',fields:[choice('hosting','Wallet hosting',[...CASHU_EXTERNAL_HOSTING_LABELS]),choice('walletLabel','External wallet',[...CASHU_EXTERNAL_WALLET_LABELS]),choice('mint','Cashu mint (send on this exact mint)',[...CASHU_EXTERNAL_MINTS]),field('instructions','Receiving instructions','textarea','Describe your existing outside-wallet transfer channel, such as where the payer sends ecash within the wallet named above. These instructions are shown to the payer. Never paste a Cashu token, seed, private key or proof.')],walletOptionIds:['cashu'],modes:['live'],verification:'manual',methods:['cashu']},
 ];
 
 export interface NormalizedConnection {provider:string;label:string;mode:'live'|'test';fields:Record<string,string>}
@@ -78,6 +80,16 @@ function validateFields(provider:string,mode:'live'|'test',fields:Record<string,
     if(f.network!==expected[f.method as keyof typeof expected])throw invalid();
     if(f.method==='bitcoin'&&!/^(bc1|[13]|tb1|[mn2])[a-zA-Z0-9]{20,100}$/.test(f.address))throw invalid();
   }
+  if(provider==='cashu-external'){
+    // Live SAT-only manual ecash receiving on an approved mint. Self-hosted and
+    // third-party wallet choices share the same manual verification level.
+    // Every saved field refuses bearer Cashu tokens and secret-shaped values.
+    if(mode!=='live')throw invalid();
+    if(!CASHU_EXTERNAL_HOSTING_LABELS.includes(f.hosting as CashuExternalHosting))throw invalid();
+    if(!CASHU_EXTERNAL_WALLET_LABELS.includes(f.walletLabel as CashuExternalWalletLabel))throw invalid();
+    if(!CASHU_EXTERNAL_MINTS.includes(f.mint as CashuExternalMint))throw invalid();
+    if(Object.values(f).some(value=>isCashuSecretShaped(value)))throw invalid();
+  }
 }
 /** The caller supplies only form data; stable server secrets are generated once before encryption. */
 export function normalizeConnection(input:unknown,options:ConnectionOriginOptions):NormalizedConnection {
@@ -96,6 +108,7 @@ export function normalizeConnection(input:unknown,options:ConnectionOriginOption
       if(value)fields[field.key]=value;
     }
     const normalized:NormalizedConnection={provider:definition.id,label:typeof input.label==='string'&&input.label.trim()?input.label.trim():definition.name,mode:input.mode as 'live'|'test',fields};
+    if(normalized.provider==='cashu-external'&&isCashuSecretShaped(normalized.label))throw invalid();
     validateFields(normalized.provider,normalized.mode,fields);
     if(normalized.provider==='lnd')fields.invoiceHmacSecret=randomBytes(32).toString('hex');
     // Constructing an adapter validates provider-specific formats without network IO.
@@ -120,6 +133,7 @@ export function buildConnectionAdapter(connection:NormalizedConnection,options:C
   }
   else if(provider==='square')adapter=createSquareReceivingAdapter(squareConfig(connection,options));
   else if(provider==='static-crypto')adapter=createCryptoAdapter({...shared,kind:'manual',method:f.method as 'bitcoin'|'liquid'|'usdt'|'usdc',address:f.address,network:f.network});
+  else if(provider==='cashu-external')adapter=createCashuExternalReceivingAdapter({id,mode:'live',hosting:f.hosting as CashuExternalHosting,walletLabel:f.walletLabel as CashuExternalWalletLabel,mint:f.mint as CashuExternalMint,instructions:f.instructions});
   else if(provider==='bank-instructions')adapter={id,mode,creationRetrySafe:true,methods:[f.method as MethodId],supportedCurrencies:['CAD','USD','EUR','GBP'],supportedCurrenciesByMethod:MANUAL_RAIL_CURRENCIES,
     async create(context){
       if(context.mode!==mode||context.method!==f.method||context.expectedAtomic!==String(context.amount)||!Number.isSafeInteger(context.amount)||context.amount<=0||!['CAD','USD','EUR','GBP'].includes(context.currency)||(context.method==='interac'&&context.currency!=='CAD')||(context.method==='ach'&&context.currency!=='USD')||(context.method==='sepa'&&context.currency!=='EUR'))throw invalid();
@@ -205,6 +219,7 @@ async function verifyConnectionMetadata(connection:NormalizedConnection,options:
     const methods=[...adapter.methods];
     if(provider==='bank-instructions')return {status:'manual',detail:'Receiving instructions saved. Independently confirm each payment in your bank or provider; no bank API is connected.',methods};
     if(provider==='static-crypto')return {status:'manual',detail:'Dedicated public destination saved for manual confirmation. No address pool or automatic settlement proof is available; destination reuse across requests is blocked.',methods};
+    if(provider==='cashu-external')return {status:'manual',detail:'External Cashu wallet instructions saved (self-hosted or third-party wallet). No mint request was made, no token or secret is held, and no funded readiness is claimed; import and verify each received ecash payment in your own wallet before confirming.',methods};
     if(provider==='lightning-address'||provider==='lnurl'){
       let raw=f.url;
       if(provider==='lightning-address'){const [user,domain]=f.lightningAddress.split('@');raw=`https://${domain}/.well-known/lnurlp/${encodeURIComponent(user)}`;}

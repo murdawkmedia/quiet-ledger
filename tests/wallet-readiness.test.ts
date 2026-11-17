@@ -45,10 +45,11 @@ test('four lanes render in fixed order and an empty account stays honest about f
     assert.doesNotMatch(copy,/funded-ready|ready to be paid|ready to receive/i);
   }
   const cashu=byLane(result,'cashu');
-  assert.deepEqual(cashu.providerIds,[],'no Cashu connection provider exists');
+  assert.deepEqual(cashu.providerIds,['cashu-external']);
   const cashuCopy=cashu.steps.map(step=>`${step.label} ${step.detail}`).join(' ');
   assert.match(cashuCopy,/not configured in Connections/i);
   assert.match(cashuCopy,/Lightning/i,'the payer handoff path is referenced');
+  assert.match(cashuCopy,/no outbound request/i,'saving stays offline');
   assert.doesNotMatch(cashuCopy,/Zeus|Bark interoperat|mint URL/i);
 });
 
@@ -98,6 +99,43 @@ test('a USDT-only static connection never populates the Bitcoin lane',()=>{
   assert.equal(bitcoin.bestStatus,'none');
   assert.equal(byLane(result,'lightning').savedCount,0);
   assert.equal(byLane(result,'ark').savedCount,0);
+});
+
+test('a saved external Cashu wallet connection is manual configuration, never metadata or funded readiness',()=>{
+  const result=lanes({providers:[...laneProviders(),manualProvider('cashu-external',['cashu'])],connections:[row({provider:'cashu-external',methods:['cashu'],status:'manual'})]});
+  const cashu=byLane(result,'cashu');
+  assert.equal(cashu.savedCount,1);
+  assert.equal(cashu.bestStatus,'manual');
+  assert.equal(cashu.metadataVerified,false,'no outbound request ever happens for this lane');
+  assert.equal(cashu.requiresManualConfirmation,true);
+  assert.equal(cashu.fundedReady,false);
+  assert.equal(cashu.fundedAcceptance,'not_tracked');
+  const setup=cashu.steps.find(step=>step.phase==='setup');
+  assert.ok(setup);assert.equal(setup.state,'done');
+  const metadata=cashu.steps.find(step=>step.phase==='metadata');
+  assert.ok(metadata);assert.equal(metadata.state,'attention');
+  assert.match(`${metadata.label} ${metadata.detail}`,/no outbound request/i);
+  assert.doesNotMatch(`${metadata.label} ${metadata.detail}`,/metadata check passed/i);
+  const manual=cashu.steps.find(step=>step.phase==='manual-check');
+  assert.ok(manual);assert.equal(manual.state,'attention');
+  const copy=`${manual.label} ${manual.detail}`;
+  assert.match(copy,/self-hosted or third-party/i);
+  assert.match(copy,/hosting label never changes the verification level/i);
+  assert.match(copy,/spendable/i);
+  assert.match(copy,/never credit/i);
+  const funded=cashu.steps.find(step=>step.phase==='funded-acceptance');
+  assert.ok(funded);assert.equal(funded.state,'todo');
+  const all=`${cashu.steps.map(step=>`${step.label} ${step.detail}`).join(' ')}`;
+  assert.doesNotMatch(all,/funded-ready|ready to be paid|ready to receive|connected to the mint|automated mint verification/i);
+});
+
+test('a Cashu row never leaks into other lanes and other lanes never populate Cashu',()=>{
+  const result=lanes({providers:[...laneProviders(),manualProvider('cashu-external',['cashu'])],connections:[row({provider:'cashu-external',methods:['cashu'],status:'manual'}),row({provider:'lnd',methods:['lightning'],status:'connected',verifiedAt:'2026-11-02T00:00:00.000Z'})]});
+  assert.equal(byLane(result,'cashu').savedCount,1);
+  assert.equal(byLane(result,'lightning').savedCount,1);
+  assert.equal(byLane(result,'bitcoin').savedCount,0);
+  const orphan=lanes({connections:[row({provider:'fictional-orphan-cashu',methods:['cashu'],status:'connected',verifiedAt:'2026-11-02T00:00:00.000Z'})]});
+  assert.equal(byLane(orphan,'cashu').savedCount,0,'unknown provider rows stay ignored');
 });
 
 test('a Bark row keeps invoice attribution manual even after a successful metadata check',()=>{

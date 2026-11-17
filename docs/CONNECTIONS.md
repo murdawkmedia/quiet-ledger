@@ -38,6 +38,7 @@ receiving details you intend to share.
 | Revolut Merchant | Merchant secret, location ID and country | Eligible Merchant account/country/method; uncertain creates require original-reference recovery |
 | Bank / Interac / Wise instructions | Receiving method, recipient and bank/Interac details | Saved payer instructions, not a bank API connection; merchant confirms exact received payment |
 | Dedicated crypto instructions | Public address, asset and network | Manual confirmation and one allocation per destination; no reusable address pool |
+| Cashu external wallet | Hosting choice (self-hosted or third-party), wallet label, approved mint and nonsecret transfer instructions | Live SAT invoices only; manual status with no network request. Both hosting choices share the same manual verification; owner imports and verifies spendable ecash in their own wallet before confirming; no tokens, seeds or proofs are ever stored. See [Cashu external wallet](CASHU-EXTERNAL-WALLET.md) |
 
 Wise, Tangerine and other bank receiving details can use the instructions form.
 That does not grant access to balances, transfers or bill payment. Bull Bitcoin,

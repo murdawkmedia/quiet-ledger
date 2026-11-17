@@ -62,8 +62,11 @@ its pinned private Hermes worker and native Marmot runtime.
 
 See the [November Cashu build plan and current limits](docs/NUT-NOVEMBER.md).
 The entry is work in progress. A [Cashu wallet guide](docs/CASHU-WALLET.md) now
-reuses verified Lightning invoices; receipts stay Lightning. Direct ecash
-receiving and redemption remain unimplemented. An [internal journal-to-invoice
+reuses verified Lightning invoices; receipts stay Lightning. SAT invoices can
+also be settled by manual [external-wallet Cashu
+receiving](docs/CASHU-EXTERNAL-WALLET.md) with owner-confirmed receipts and no
+token custody. Automatic ecash validation and redemption remain unimplemented. An
+[internal journal-to-invoice
 settlement boundary](docs/CASHU-INVOICE-INTAKE.md) is fixture-tested, but no native
 merchant wallet, token input or custody is activated.
 
