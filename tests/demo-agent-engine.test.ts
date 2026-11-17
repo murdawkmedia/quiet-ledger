@@ -6,6 +6,27 @@ import {v2 as nip44} from 'nostr-tools/nip44';
 import {createDemoHumanParticipant,type DemoTeamNetwork} from '../client/demo-agent-engine.js';
 class MemoryStore implements GenericKeyValueStore<unknown>{values=new Map<string,unknown>();async getItem(k:string){return structuredClone(this.values.get(k)??null);}async setItem(k:string,v:unknown){this.values.set(k,structuredClone(v));return v;}async removeItem(k:string){this.values.delete(k);}async clear(){this.values.clear();}async keys(){return [...this.values.keys()];}}
 const relay='ws://localhost:4419/marmot';
+test('a protected relay is resolved once from the participant identity before any publication',async()=>{
+ const t=transport(),storage=new MemoryStore(),calls:string[]=[],namespace='fictional-resolved-relay';let expectedPublications=0;
+ const resolveRelay=async(pubkey:string)=>{calls.push(pubkey);assert.equal(t.events.length,expectedPublications);return relay;};
+ const human=await createDemoHumanParticipant({namespace,relayUrl:resolveRelay,network:t.network,storage});
+ try{
+  assert.deepEqual(calls,[human.pubkey]);assert.equal(t.events.length,0);
+  await human.prepare();assert(t.events.some(event=>event.kind===30443&&event.pubkey===human.pubkey));
+  await assert.rejects(createDemoHumanParticipant({namespace,relayUrl:resolveRelay,network:t.network,storage}),/already open/);
+  assert.equal(calls.length,1,'a competing participant must not resolve or start another team');
+ }finally{await human.dispose();}
+ expectedPublications=t.events.length;
+ const reopened=await createDemoHumanParticipant({namespace,relayUrl:resolveRelay,network:t.network,storage});
+ try{assert.deepEqual(calls,[human.pubkey,human.pubkey]);assert.equal(reopened.pubkey,human.pubkey);}finally{await reopened.dispose();}
+});
+test('relay resolution failure releases the participant lock and preserves the same retry identity',async()=>{
+ const t=transport(),storage=new MemoryStore(),namespace='fictional-failed-relay';let firstPubkey='';
+ await assert.rejects(createDemoHumanParticipant({namespace,network:t.network,storage,relayUrl:async(pubkey:string)=>{firstPubkey=pubkey;throw new Error('Fictional team unavailable.');}}),/Fictional team unavailable/);
+ assert.equal(t.events.length,0);
+ const retry=await createDemoHumanParticipant({namespace,network:t.network,storage,relayUrl:async()=>relay});
+ try{assert.equal(retry.pubkey,firstPubkey);await retry.prepare();assert(t.events.some(event=>event.pubkey===retry.pubkey));}finally{await retry.dispose();}
+});
 function transport(){const events:Event[]=[];const network:DemoTeamNetwork={async publish(e){if(!events.some(x=>x.id===e.id))events.push(structuredClone(e));},async query(filters){return events.filter(e=>matchFilters(filters as Filter[],e));}};return {events,network};}
 function bot(network:DemoTeamNetwork){const secret=generateSecretKey(),pubkey=getPublicKey(secret),storage=new MemoryStore();const n={async publish(_r:string[],event:Event){await network.publish(event);return {[relay]:{from:relay,ok:true}};},async request(_r:string[],filters:Filter[]|Filter){return network.query(Array.isArray(filters)?filters:[filters]);},subscription(){return {subscribe(){return {unsubscribe(){}};}};},async getUserInboxRelays(){return [relay];}};const sdk=new MarmotClient({clientId:pubkey,signer:{getPublicKey:()=>pubkey,signEvent:e=>finalizeEvent(e,secret),nip44:{encrypt:(p,t)=>nip44.encrypt(t,nip44.utils.getConversationKey(secret,p)),decrypt:(p,t)=>nip44.decrypt(t,nip44.utils.getConversationKey(secret,p))}},network:n,groupStateStore:storage as never,keyPackageStore:new MemoryStore() as never,inviteStore:new MemoryStore() as never,ingestStateStore:new MemoryStore() as never,rewindStore:new MemoryStore() as never,removedMarkerStore:new MemoryStore() as never});return {pubkey,sdk};}
 test('human establishes three authenticated members and receives both real encrypted replies',async()=>{const t=transport(),riley=bot(t.network),jordan=bot(t.network),storage=new MemoryStore();const human=await createDemoHumanParticipant({namespace:'fictional-demo-browser/room-one',relayUrl:relay,network:t.network,storage});try{await Promise.all([riley.sdk.keyPackages.ensurePublished({relays:[relay]}),jordan.sdk.keyPackages.ensurePublished({relays:[relay]}),human.prepare()]);const room=await human.connect([{role:'client',name:'Riley',pubkey:riley.pubkey},{role:'accountant',name:'Jordan',pubkey:jordan.pubkey}]);assert.match(room.groupId,/^[a-f0-9]+$/);assert.match(room.nostrGroupId,/^[a-f0-9]{64}$/);const groups=[];for(const b of [riley,jordan]){for(const e of t.events.filter(e=>e.kind===1059&&e.tags.some(x=>x[0]==='p'&&x[1]===b.pubkey)))await b.sdk.invites.ingestEvent(e);await b.sdk.invites.decryptGiftWraps();const invite=(await b.sdk.invites.getUnread())[0];assert(invite);const joined=await b.sdk.joinGroupFromWelcome({welcomeRumor:invite});groups.push(joined.group);}await human.send('client','What did we agree to?');for(const [i,b] of [riley,jordan].entries()){const content=i?'Jordan: fictional ledger is open.':'Riley: fictional workshop agreed.';await b.sdk.groups.send(groups[i].id,createApplicationMessageIntent(createChatRumor({pubkey:b.pubkey,content})));}await human.sync();assert.deepEqual(human.messages().filter(m=>m.role!=='human').map(m=>m.role).sort(),['accountant','client']);assert(!JSON.stringify(t.events).includes('fictional ledger is open.'));assert(!JSON.stringify(t.events).includes('What did we agree to?'));}finally{await human.dispose();for(const b of [riley,jordan])for(const g of b.sdk.groups.loaded)g.dispose();}});

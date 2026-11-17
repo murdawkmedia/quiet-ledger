@@ -52,11 +52,14 @@ export function DemoTeamPage({workspaceKey,invoiceIds}:{workspaceKey?:string;inv
     const engine=await import('../demo-agent-engine');const {getMarmotDeviceId}=await import('../marmot-engine');const device=await getMarmotDeviceId();
     const scopeKey=workspaceKey??visit.invoice.id;const bindingKey=`quiet-ledger-team-binding:${scopeKey}`;let binding=localStorage.getItem(bindingKey);if(!binding){binding=invoiceIds?.find(id=>localStorage.getItem(`quiet-ledger-team-attempt:${id}`))??visit.invoice.id;localStorage.setItem(bindingKey,binding);}const legacyKey=`quiet-ledger-team-attempt:${binding}`;const key=`quiet-ledger-team-attempt:${scopeKey}`;let attempt=localStorage.getItem(key)??localStorage.getItem(legacyKey);if(team&&['idle','expired','offline'].includes(team.state))attempt=crypto.randomUUID();if(!attempt)attempt=crypto.randomUUID();localStorage.setItem(key,attempt);
     const namespace=`${binding}:${device}:${attempt}`,relay=new URL('/marmot',location.origin);relay.protocol=location.protocol==='https:'?'wss:':'ws:';
-    let participant=await engine.createDemoHumanParticipant({namespace,channel:selected,relayUrl:relay.href});if(!alive.current){await participant.dispose();return;}human.current=participant;
-    let t=await request<DemoTeamView>(endpoint,{humanPubkey:participant.pubkey});if(!alive.current)return;setTeam(t);
-    if(!/^\/marmot\/[A-Za-z0-9_-]{43}$/.test(t.relayPath))throw new Error('The private demo relay is unavailable.');
-    await participant.dispose();participant=await engine.createDemoHumanParticipant({namespace,channel:selected,relayUrl:new URL(t.relayPath,relay).href});human.current=participant;recoverQueued(participant,selected);
-    await participant.prepare();t=await waitFor(t=>t.members.length===2&&['waiting','ready','paused'].includes(t.state));
+    const participant=await engine.createDemoHumanParticipant({namespace,channel:selected,relayUrl:async humanPubkey=>{
+      const t=await request<DemoTeamView>(endpoint,{humanPubkey});
+      if(!alive.current)throw new Error('Conversation opening was cancelled.');setTeam(t);
+      if(!/^\/marmot\/[A-Za-z0-9_-]{43}$/.test(t.relayPath))throw new Error('The private demo relay is unavailable.');
+      return new URL(t.relayPath,relay).href;
+    }});
+    if(!alive.current){await participant.dispose();return;}human.current=participant;recoverQueued(participant,selected);
+    await participant.prepare();let t=await waitFor(t=>t.members.length===2&&['waiting','ready','paused'].includes(t.state));
     const room=await participant.connect(t.members.filter(member=>selected==='group'||member.role===selected));activeRoom.current=room;
     for(let join=0;join<12;join++){try{t=await request<DemoTeamView>(`${endpoint}/connect`,{channel:selected,...room});if(alive.current)setTeam(t);break;}catch(error){if(!(error instanceof ApiError)||error.status!==409||join===11)throw error;await pauseBeforeRetry();}}
     await waitFor(t=>['ready','paused'].includes(t.state)&&demoRooms(t)[selected]?.groupId===room.groupId&&demoRooms(t)[selected]?.nostrGroupId===room.nostrGroupId);

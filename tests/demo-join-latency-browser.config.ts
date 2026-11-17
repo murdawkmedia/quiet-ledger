@@ -1,0 +1,3 @@
+import {defineConfig} from '@playwright/test';
+import {resolve} from 'node:path';
+export default defineConfig({testDir:'./browser',testMatch:['demo-join-setup.spec.ts','demo-team.spec.ts'],workers:1,timeout:60000,expect:{timeout:15000},outputDir:resolve(process.env.QUIET_LEDGER_JOIN_ARTIFACTS??'.runtime/join-artifacts'),reporter:'list',use:{baseURL:'http://localhost:4352',headless:true,launchOptions:{executablePath:'/usr/bin/chromium'}},webServer:{command:'node --import tsx tests/demo-conversation-app.ts',cwd:resolve(import.meta.dirname,'..'),url:'http://localhost:4352/api/health',timeout:30000,reuseExistingServer:false}});
