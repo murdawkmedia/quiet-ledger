@@ -1,0 +1,25 @@
+import {test,expect} from '@playwright/test';
+test('real-payment page stays inside the same demo and preserves the original simulated invoice',async({page})=>{
+  const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
+  await page.goto('/');await page.getByRole('button',{name:'Hackathon demo',exact:true}).click();
+  await page.getByLabel('Demo password',{exact:true}).fill('marmot');await page.getByRole('button',{name:'Enter hackathon demo',exact:true}).click();
+  await expect(page).toHaveURL(/\/demo$/);
+  const original=await page.request.get('/api/hackathon-demo').then(response=>response.json());
+  await page.getByRole('link',{name:'Real 21-sat payment',exact:true}).click();
+  await expect(page).toHaveURL(/\/demo\/real-payment$/);
+  await expect(page.getByText('Explore the whole flow. No real money moves.',{exact:true})).toHaveCount(0);
+  const create=page.getByRole('button',{name:'Create my real 21-sat Lightning invoice',exact:true});
+  await expect(create).toBeDisabled();await page.getByRole('checkbox').check();
+  const issue=page.waitForResponse(response=>response.url().endsWith('/api/hackathon-demo/live-payment')&&response.request().method()==='POST');
+  await create.click();expect((await issue).status()).toBe(201);
+  await expect(page.getByText('Waiting for payment',{exact:true})).toBeVisible();
+  await page.reload();await expect(page.getByRole('button',{name:'Pay from a Cashu wallet',exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Pay from a Cashu wallet',exact:true}).click();
+  await expect(page.getByAltText('Scan this Lightning invoice in your Cashu wallet')).toBeVisible();
+  await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  expect((await page.request.get('/__fixture/status').then(response=>response.json())).creates).toBe(1);
+  await page.request.post('/__fixture/settle');await page.getByRole('button',{name:'Check payment',exact:true}).click();
+  await expect(page.getByText('Real Lightning payment received',{exact:true})).toBeVisible();
+  const after=await page.request.get('/api/hackathon-demo').then(response=>response.json());
+  expect(after.invoice).toEqual(original.invoice);expect(errors).toEqual([]);
+});

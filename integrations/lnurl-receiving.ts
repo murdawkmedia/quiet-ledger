@@ -6,6 +6,7 @@ import {isIP} from 'node:net';
 import * as bolt11 from 'bolt11';
 import type {ReceivingAdapter,ReceivingContext,ReceivingIntent,ReceivingObservation} from '../shared/receiving.js';
 import {bounded,minorAmount,type HttpFetch} from './http.js';
+import {coinosCallbackAllowed,isCoinosCallbackRequest} from './coinos-callback.js';
 
 export interface LnurlAdapterConfig {
   kind?:'lnurl';id:string;url?:string;lightningAddress?:string;
@@ -32,24 +33,26 @@ function publicIp(ip:string):boolean {
   return false;
 }
 const loopback=(hostname:string)=>['127.0.0.1','::1','localhost'].includes(hostname.replace(/^\[|\]$/g,'').toLowerCase());
-function safeUrl(raw:unknown,allowLoopback:boolean,origin?:string,allowAmount=false):URL {
+function safeUrl(raw:unknown,allowLoopback:boolean,origin?:string,allowAmount=false,coinosException=false):URL {
   if(typeof raw!=='string'||raw.length>2048||/[\u0000-\u0020\u007f\\]/.test(raw))throw new Error('Invalid LNURL endpoint.');
   let url:URL;try{url=new URL(raw);}catch{throw new Error('Invalid LNURL endpoint.');}
   const host=url.hostname.replace(/^\[|\]$/g,'').toLowerCase(),local=allowLoopback&&loopback(host)&&url.protocol==='http:';
   const privateHost=loopback(host)||(isIP(host)&&!publicIp(host))||(!isIP(host)&&!host.includes('.'))||/\.(local|localhost|internal|onion|home|lan)\.?$/.test(host);
   if(url.username||url.password||url.hash||!(url.protocol==='https:'||local)||(!local&&privateHost))throw new Error('LNURL requires a public HTTPS endpoint or explicitly allowed loopback HTTP, without credentials.');
-  if(origin&&url.origin!==origin)throw new Error('LNURL endpoint origin differs from the configured receiver.');
+  const coinosCallback=coinosException&&isCoinosCallbackRequest(url);
+  if(origin&&url.origin!==origin&&!coinosCallback)throw new Error('LNURL endpoint origin differs from the configured receiver.');
   const allowed=new Set(['tag','username','user','id','identifier','hash','payment_hash']);
   if(allowAmount)allowed.add('amount');
   for(const [name,value]of url.searchParams){
-    if(!allowed.has(name)||url.searchParams.getAll(name).length!==1||!value||value.length>192||!/[a-zA-Z0-9]/.test(value)||!/^[a-zA-Z0-9_.@:+-]+$/.test(value)||(['hash','payment_hash'].includes(name)&&!hex64(value)))throw new Error('LNURL endpoint contains unsupported query parameters.');
+    const coinosDomain=coinosCallback&&name==='domain'&&value==='coinos.io';
+    if((!allowed.has(name)&&!coinosDomain)||url.searchParams.getAll(name).length!==1||!value||value.length>192||!/[a-zA-Z0-9]/.test(value)||!/^[a-zA-Z0-9_.@:+-]+$/.test(value)||(['hash','payment_hash'].includes(name)&&!hex64(value)))throw new Error('LNURL endpoint contains unsupported query parameters.');
   }
   return url;
 }
 /** Native transport pins the validated DNS result to the actual socket lookup. */
 function transport(allowLoopback:boolean):HttpFetch {
   return async(raw,init)=>{
-    const url=safeUrl(raw,allowLoopback,undefined,true),host=url.hostname.replace(/^\[|\]$/g,''),local=allowLoopback&&loopback(host)&&url.protocol==='http:';
+    const url=safeUrl(raw,allowLoopback,undefined,true,true),host=url.hostname.replace(/^\[|\]$/g,''),local=allowLoopback&&loopback(host)&&url.protocol==='http:';
     // Amount is added only by the adapter after safeUrl validates the callback.
     const addresses=isIP(host)?[{address:host,family:isIP(host)}]:await lookup(host,{all:true,verbatim:true});
     if(!addresses.length||addresses.some(x=>local?!loopback(x.address):!publicIp(x.address)))throw unavailable();
@@ -146,7 +149,8 @@ export function createLnurlAdapter(config:LnurlAdapterConfig):ReceivingAdapter {
         const text=rows.filter(row=>row[0]==='text/plain');
         if(text.length!==1||typeof text[0][1]!=='string'||!text[0][1]||text[0][1].length>8000)throw new Error('Invalid LNURL metadata.');
         if(address&&!rows.some(row=>['text/identifier','text/email'].includes(row[0])&&row[1]===address))throw new Error('LNURL metadata does not match the configured Lightning Address.');
-        const callback=safeUrl(metadataResponse.callback,allowLoopback,endpoint.origin);callback.searchParams.set('amount',amount.toString());
+        let coinos=false;try{coinos=coinosCallbackAllowed(endpoint,new URL(metadataResponse.callback));}catch{coinos=false;}
+        const callback=safeUrl(metadataResponse.callback,allowLoopback,endpoint.origin,false,coinos);callback.searchParams.set('amount',amount.toString());
         // LNURL-pay has no idempotency key. Once this GET may create an invoice,
         // failure must preserve uncertainty and never issue another callback.
         entry.attempted=true;

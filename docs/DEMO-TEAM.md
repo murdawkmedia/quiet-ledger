@@ -48,8 +48,10 @@ fictional company. Group messages normally reach both; an explicit human-written
 5. Open **Group** to bring both together; reload to show each room's persisted
    history. Ask about Marmot privacy only when you want that explanation.
 
-The starter invoice is fictional CAD 125 with zero tax. Every payment in this
-demo is simulated. Model/relay availability affects response time. Failed calls
+The starter invoice is fictional CAD 125 with zero tax. Payments for this fictional
+conversation invoice are simulated. The separate optional **Real 21-sat payment**
+page uses an explicitly configured Coinos receiver and real funds; see
+[demo receiving](DEMO-LIVE-PAYMENT.md). Model/relay availability affects response time. Failed calls
 appear visibly; there is no scripted failure response or paid-provider fallback.
 
 Pause/resume controls the whole team's inference. Reset retires all its rooms and

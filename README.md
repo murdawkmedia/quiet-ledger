@@ -3,6 +3,8 @@
 Private invoices, checkout and client conversations, with self-hosted accounts
 and optional Bitcoin/fiat receiving connections.
 
+The optional **Real 21-sat payment** page stays inside the `marmot` demo. It uses an operator-configured receiving-only Coinos connection; other demo invoices remain simulations. A Cashu wallet can fund the Lightning invoice, and the receipt remains Lightning. [Demo receiving setup](docs/DEMO-LIVE-PAYMENT.md).
+
 [Private saved drafts](docs/INVOICE-DRAFTS.md) preserve unfinished invoice work
 on the server. Reopen drafts, duplicate an earlier invoice, and review carried
 expenses before issuing. Draft saves create no customer checkout or email.

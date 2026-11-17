@@ -45,6 +45,7 @@ import {createAccountApiKeys} from './account-api-keys.js';
 import {createAccountConnections} from './account-connections.js';
 import {createDemoTeam,type DemoTeamOptions} from './demo-agents.js';
 import {HackathonDemo} from './hackathon-demo.js';
+import {DemoLivePayments} from './demo-live-payment.js';
 import {createMarmotConversationsRouter} from './marmot-conversations.js';
 import type {HttpFetch} from '../integrations/http.js';
 import {manualReceiving} from './receiving-config.js';
@@ -56,6 +57,8 @@ export interface AppOptions {
   emailInbox?:Omit<InvoiceEmailInboxOptions,'threads'|'credentialFor'|'now'>;
   communications?:{background?:boolean;networkFactory?:CommunicationsRuntimeOptions['networkFactory']};
   demoTeam?:Omit<DemoTeamOptions,'store'|'now'|'getSession'|'getDemoCase'|'publicOrigin'>;
+  /** Trusted receiving-only adapter for the explicit real sample, isolated from demo simulations. */
+  demoLiveAdapter?:ReceivingAdapter;
   ownerToken?: string;
   encryptionKey?:Buffer;
   hosted?:{publicOrigin:string;proxySecret:string;hackathonDemo?:boolean;allowInsecureLoopback?:boolean;limits?:{invoicesPerWorkspace?:number;receiveRequestsPerInvoice?:number;idempotencyPerScope?:number;requestsPerMinute?:number}};
@@ -124,6 +127,7 @@ export function createApp(options: AppOptions) {
   // Keep the registry available when disabled so existing/expired demo links cannot become live checkouts.
   const hackathonDemo=hosted?new HackathonDemo({store,now}):undefined;
   const demoEnabled=hosted?.hackathonDemo===true;
+  if(options.demoLiveAdapter&&!demoEnabled)throw new Error('The dedicated demo receiver requires an enabled hosted demo.');
   const isHackathonWorkspace=(workspace:string)=>Boolean(hackathonDemo&&store.db.prepare('SELECT 1 FROM hackathon_demo_workspaces WHERE id=?').get(workspace));
   const assertPublicWorkspace=(workspace:string)=>{if(isHackathonWorkspace(workspace)&&(!demoEnabled||!hackathonDemo!.hasWorkspace(workspace)))throw new DomainError(404,'This demo visit is unavailable or expired.');};
   const denyDemoFinancial=(workspace:string)=>{if(isHackathonWorkspace(workspace))throw new DomainError(403,'Use the signed-in demo tour to simulate this fictional payment.');};
@@ -147,6 +151,10 @@ export function createApp(options: AppOptions) {
   const communications=store.encrypted?createCommunicationsRuntime({store,inbox:emailInbox,threads:invoiceThreads,replies:threadEmail,delivery:invoiceEmail,now,networkFactory:options.communications?.networkFactory}):undefined;
   const receiving=new ReceivingService(store,hosted?[manualReceiving]:options.receivingAdapters??[],options.receivingQuote??quoteReceiving,now,undefined,methodPricing);
   const demoReceiving=hosted?new ReceivingService(store,[],options.receivingQuote??quoteReceiving,now,undefined,methodPricing):undefined;
+  const demoLivePayments=options.demoLiveAdapter?new DemoLivePayments({
+    store,receiving:new ReceivingService(store,[options.demoLiveAdapter],options.receivingQuote??quoteReceiving,now,undefined,methodPricing),
+    adapterId:options.demoLiveAdapter.id,receiver:'countzapula@coinos.io',validVisit:workspace=>Boolean(demoEnabled&&hackathonDemo!.hasWorkspace(workspace)),now,
+  }):undefined;
   const accountConnections=hosted?createAccountConnections({store,publicOrigin:hosted.publicOrigin,now,getSession:(_req,res)=>res.locals.session,fetcher:options.connectionFetcher,allowInsecureLoopback:hosted.allowInsecureLoopback}):undefined;
   const scopedReceiving=new Map<string,{revision:string;service:ReceivingService}>();
   const receivingFor=(workspace:string)=>{
@@ -262,7 +270,8 @@ export function createApp(options: AppOptions) {
     if(/^\/(?:account|receiving|collateral|ark)(?:\/|$)/i.test(req.path)||(/^\/auth(?:\/|$)/i.test(req.path)&&!(req.method==='GET'&&req.path==='/auth/config')))return next(new DomainError(403,'Use a private account for account settings and provider connections.'));
     if(['GET','HEAD','OPTIONS'].includes(req.method))return next();
     const conversation=/^\/(?:invoices|checkout)\/[A-Za-z0-9_-]{1,128}\/conversation(?:\/(?:events|query))?$/.test(req.path);
-    if((req.method==='DELETE'&&(req.path==='/session'||/^\/invoice-templates\/[0-9a-f-]{36}$/.test(req.path)))||(req.method==='POST'&&(conversation||req.path==='/invoice-templates'||req.path==='/invoice-email/settings'||/^\/invoices\/[0-9a-f-]{36}\/email$/.test(req.path)||req.path==='/hackathon-demo/invoices'||req.path==='/hackathon-demo/simulate-payment'||/^\/hackathon-demo\/agents(?:\/(?:connect|pause|resume|reset|invite))?$/.test(req.path))))return next();
+    const demoLiveMutation=req.path==='/hackathon-demo/live-payment'||req.path==='/hackathon-demo/live-payment/check';
+    if((req.method==='DELETE'&&(req.path==='/session'||/^\/invoice-templates\/[0-9a-f-]{36}$/.test(req.path)))||(req.method==='POST'&&(demoLiveMutation||conversation||req.path==='/invoice-templates'||req.path==='/invoice-email/settings'||/^\/invoices\/[0-9a-f-]{36}\/email$/.test(req.path)||req.path==='/hackathon-demo/invoices'||req.path==='/hackathon-demo/simulate-payment'||/^\/hackathon-demo\/agents(?:\/(?:connect|pause|resume|reset|invite))?$/.test(req.path))))return next();
     return next(new DomainError(403,'This fictional demo supports only its tour, conversation and simulated payment actions.'));
   });
   if(hosted)app.use(createMarmotConversationsRouter({store,now,publicOrigin:hosted.publicOrigin,getSession:(_req,res)=>res.locals.session,assertPublicWorkspace,isDemoWorkspace:isHackathonWorkspace}));
@@ -405,6 +414,21 @@ export function createApp(options: AppOptions) {
     return session;
   };
   app.get('/api/hackathon-demo',(_req,res)=>{const session=demoSession(res);res.json(hackathonDemo!.view(session.workspace));});
+  const disabledDemoLivePayment=()=>({enabled:false,receiver:'countzapula@coinos.io',amountSats:21,rail:'lightning'});
+  app.get('/api/hackathon-demo/live-payment',(_req,res)=>{
+    const session=demoSession(res);res.json(demoLivePayments?.view(session.workspace)??disabledDemoLivePayment());
+  });
+  app.post('/api/hackathon-demo/live-payment',async(req,res)=>{
+    const session=demoSession(res),input=parse(z.object({acknowledgeRealFunds:z.literal(true)}).strict(),req.body);
+    if(!demoLivePayments)throw new DomainError(503,'The optional real-payment sample receiver is not configured.');
+    const key=idempotencyKey(req);if(!key)throw new DomainError(400,'A valid Idempotency-Key header is required.');
+    res.status(201).json(await demoLivePayments.create(session.workspace,input.acknowledgeRealFunds,key));
+  });
+  app.post('/api/hackathon-demo/live-payment/check',async(req,res)=>{
+    const session=demoSession(res);parse(z.object({}).strict(),req.body??{});
+    if(!demoLivePayments)throw new DomainError(503,'The optional real-payment sample receiver is not configured.');
+    res.json(await demoLivePayments.check(session.workspace));
+  });
   app.post('/api/hackathon-demo/simulate-payment',(req,res)=>{
     parse(z.object({}).strict(),req.body??{});
     const session=demoSession(res);

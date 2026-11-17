@@ -10,6 +10,7 @@ import {loadOrCreatePrivateToken} from './private-token.js';
 import {loadHostedRuntime} from './hosted-runtime.js';
 import {loadDemoAgentRuntime} from './demo-agent-runtime.js';
 import {createSelfHostFrontend} from './selfhost-front.js';
+import {loadDemoLiveAdapter} from './demo-live-config.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const hostedRuntime=loadHostedRuntime(process.env);
@@ -26,7 +27,8 @@ const apiToken=hostedRuntime?undefined:loadOrCreatePrivateToken(apiTokenPath);
 const apiScopes:ApiScope[]=['invoices:read','invoices:write','receiving:read','receiving:write','collateral:read'];
 const connections=hostedRuntime?undefined:loadReceivingConnections(process.env.RECEIVING_CONNECTIONS_FILE);
 const demoTeam=loadDemoAgentRuntime(process.env);
-const app = createApp({communications:{background:true},demoTeam,dbPath:join(dataDir,'ledger.sqlite'),ownerToken,allowedHosts:allowedHosts?.length?allowedHosts:undefined,
+const demoLiveAdapter=loadDemoLiveAdapter(process.env);
+const app = createApp({communications:{background:true},demoTeam,demoLiveAdapter,dbPath:join(dataDir,'ledger.sqlite'),ownerToken,allowedHosts:allowedHosts?.length?allowedHosts:undefined,
   ...(hostedRuntime?hostedRuntime:{privateScenarioPath:process.env.PRIVATE_SCENARIO_PATH,squareSandbox:loadSquareSandboxOptions(process.env),receivingAdapters:connections!.adapters,collateral:connections!.collateral,arkConnections:connections!.arkConnections,apiKeys:[{token:apiToken!,scopes:apiScopes}]})});
 const host = process.env.HOST ?? '127.0.0.1';
 const port = Number(process.env.PORT ?? (hostedRuntime?.selfHosted?'4417':'4317'));

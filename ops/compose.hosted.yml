@@ -22,6 +22,7 @@ services:
       BACKUP_DIR: /backups
       HOSTED_ACCOUNTS: "true"
       HACKATHON_DEMO_ENABLED: ${HACKATHON_DEMO_ENABLED:-false}
+      DEMO_LIVE_COINOS_TOKEN_FILE: ${DEMO_LIVE_COINOS_TOKEN_FILE:-}
       SIMULATION_ONLY: "true"
       PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:?Set the stable public HTTPS origin}
       ALLOWED_HOSTS: ${BACKEND_HOST:?Set the private proxy origin host},localhost,127.0.0.1

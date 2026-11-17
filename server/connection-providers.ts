@@ -11,6 +11,7 @@ import type {ConnectionProviderDefinition,ConnectionProviderField} from '../shar
 import type {ReceivingAdapter,ReceivingContext} from '../shared/receiving.js';
 import type {MethodId} from '../shared/payment-methods.js';
 import {connectionFetch,validateConnectionUrl} from './connection-transport.js';
+import {coinosCallbackAllowed} from '../integrations/coinos-callback.js';
 
 const field=(key:string,label:string,type:ConnectionProviderField['type']='text',help?:string,required=true):ConnectionProviderField=>({key,label,type,required,...(help?{help}:{})});
 const choice=(key:string,label:string,values:string[]):ConnectionProviderField=>({...field(key,label,'select'),options:values.map(value=>({value,label:value}))});
@@ -178,10 +179,15 @@ async function readJson(fetcher:HttpFetch,url:string,init:RequestInit={}):Promis
 }
 function lnurlMetadata(value:any,endpoint:URL,address?:string):void {
   if(!object(value)||value.tag!=='payRequest'||!Number.isSafeInteger(value.minSendable)||!Number.isSafeInteger(value.maxSendable)||(value.minSendable as number)<1||(value.maxSendable as number)<(value.minSendable as number)||typeof value.metadata!=='string'||value.metadata.length>200000)throw invalid();
+  // The strict Coinos exception is the only cross-origin/extra-parameter path;
+  // every other provider keeps the generic same-origin query allowlist.
   const callback=validateConnectionUrl(value.callback);
-  if(callback.origin!==endpoint.origin)throw invalid();
-  const allowed=new Set(['tag','username','user','id','identifier','hash','payment_hash']);
-  for(const [key,item]of callback.searchParams)if(!allowed.has(key)||callback.searchParams.getAll(key).length!==1||!item||item.length>192||!/^[a-zA-Z0-9_.@:+-]+$/.test(item)||(['hash','payment_hash'].includes(key)&&!/^[a-f0-9]{64}$/.test(item)))throw invalid();
+  const coinos=coinosCallbackAllowed(endpoint,callback);
+  if(!coinos&&callback.origin!==endpoint.origin)throw invalid();
+  if(!coinos){
+    const allowed=new Set(['tag','username','user','id','identifier','hash','payment_hash']);
+    for(const [key,item]of callback.searchParams)if(!allowed.has(key)||callback.searchParams.getAll(key).length!==1||!item||item.length>192||!/^[a-zA-Z0-9_.@:+-]+$/.test(item)||(['hash','payment_hash'].includes(key)&&!/^[a-f0-9]{64}$/.test(item)))throw invalid();
+  }
   const rows=JSON.parse(value.metadata);
   if(!Array.isArray(rows)||rows.length>64||rows.some(row=>!Array.isArray(row)||row.length<2||typeof row[0]!=='string'))throw invalid();
   const text=rows.filter(row=>row[0]==='text/plain');
