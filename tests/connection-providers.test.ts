@@ -69,7 +69,7 @@ test('verification uses only metadata/account reads and never creates a financia
   }
 });
 test('definitions expose only implemented receiving rails and strict mode/provider fields',()=>{
-  assert.equal(CONNECTION_PROVIDERS.length,14);assert.equal(new Set(CONNECTION_PROVIDERS.map(row=>row.id)).size,14);
+  assert.equal(CONNECTION_PROVIDERS.length,15);assert.equal(new Set(CONNECTION_PROVIDERS.map(row=>row.id)).size,15);
   for(const provider of Object.keys(inputs)){
     const adapter=buildConnectionAdapter(normalized(provider),options);assert.equal(adapter.id,options.id);assert.equal(adapter.mode,'live');assert.ok(adapter.methods.length);
     assert.throws(()=>normalizeConnection({provider,mode:'live',fields:{...inputs[provider],fetcher:'override'}},options));

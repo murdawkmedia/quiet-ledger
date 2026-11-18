@@ -43,6 +43,7 @@ import {createApiAccess,type ApiScope} from './api-access.js';
 import {createAccountAuth} from './account-auth.js';
 import {createAccountApiKeys} from './account-api-keys.js';
 import {createAccountConnections} from './account-connections.js';
+import type {NwcTransport} from './nwc-transport.js';
 import {createDemoTeam,type DemoTeamOptions} from './demo-agents.js';
 import {HackathonDemo} from './hackathon-demo.js';
 import {DemoLivePayments} from './demo-live-payment.js';
@@ -64,6 +65,8 @@ export interface AppOptions {
   hosted?:{publicOrigin:string;proxySecret:string;hackathonDemo?:boolean;allowInsecureLoopback?:boolean;limits?:{invoicesPerWorkspace?:number;receiveRequestsPerInvoice?:number;idempotencyPerScope?:number;requestsPerMinute?:number}};
   receivingAdaptersForWorkspace?:(workspace:string)=>ReceivingAdapter[];
   connectionFetcher?:HttpFetch;
+  /** Trusted transport injection for local fixtures only; never tenant config. */
+  nwcTransport?:NwcTransport;
   privateScenarioPath?: string;
   fxFetcher?: () => Promise<unknown>;
   now?: () => Date;
@@ -155,7 +158,7 @@ export function createApp(options: AppOptions) {
     store,receiving:new ReceivingService(store,[options.demoLiveAdapter],options.receivingQuote??quoteReceiving,now,undefined,methodPricing),
     adapterId:options.demoLiveAdapter.id,receiver:'countzapula@coinos.io',validVisit:workspace=>Boolean(demoEnabled&&hackathonDemo!.hasWorkspace(workspace)),now,
   }):undefined;
-  const accountConnections=hosted?createAccountConnections({store,publicOrigin:hosted.publicOrigin,now,getSession:(_req,res)=>res.locals.session,fetcher:options.connectionFetcher,allowInsecureLoopback:hosted.allowInsecureLoopback}):undefined;
+  const accountConnections=hosted?createAccountConnections({store,publicOrigin:hosted.publicOrigin,now,getSession:(_req,res)=>res.locals.session,fetcher:options.connectionFetcher,nwcTransport:options.nwcTransport,allowInsecureLoopback:hosted.allowInsecureLoopback}):undefined;
   const scopedReceiving=new Map<string,{revision:string;service:ReceivingService}>();
   const receivingFor=(workspace:string)=>{
     if(isHackathonWorkspace(workspace))return demoReceiving!;

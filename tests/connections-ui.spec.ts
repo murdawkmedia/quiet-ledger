@@ -1,4 +1,5 @@
 import {test,expect,type Page} from '@playwright/test';
+import {CONNECTION_PROVIDERS} from '../server/connection-providers.js';
 
 // Public synthetic values only. No provider account or network is contacted.
 const providers=[{
@@ -8,6 +9,28 @@ const providers=[{
 },{id:'synthetic-bank',name:'Saved bank instructions',description:'Save receiving details for your existing bank, Wise or Tangerine account. Confirm payments independently.',fields:[{key:'instructions',label:'Payment instructions',type:'textarea',required:true},{key:'reference',label:'Reference label',type:'text'}],walletOptionIds:['manual'],modes:['live'],verification:'manual',methods:['bank']},
 {id:'synthetic-review-provider',name:'Fictional reviewed provider',description:'API access is checked. Merchant identity requires manual review.',fields:[{key:'clientSecret',label:'Client secret',type:'password',required:true}],walletOptionIds:['paypal'],modes:['live','test'],verification:'manual',methods:['paypal']}];
 const verified={id:'connection-fixture-1',provider:'synthetic-processor',label:'Fictional shop',mode:'live',status:'connected',detail:'Merchant metadata verified.',methods:['card'],createdAt:'2026-11-05T17:00:00.000Z',verifiedAt:'2026-11-05T17:00:00.000Z'};
+
+test('NWC setup uses the real provider fields, masks its secret and clears it after save',async({page})=>{
+ const provider=CONNECTION_PROVIDERS.find(row=>row.id==='nwc');expect(provider).toBeTruthy();
+ const uri='nostr+walletconnect://'+'2'.repeat(64)+'?relay=wss%3A%2F%2Frelay.example.com&secret='+'3'.repeat(64);
+ let saved:any,connection:any;
+ await page.route('**/api/account/connections',async route=>{
+  if(route.request().method()==='GET')return route.fulfill({json:{providers:[provider],connections:connection?[connection]:[]}});
+  saved=route.request().postDataJSON();connection={id:'conn-nwc-fictional',provider:'nwc',label:'Fictional Zeus',mode:'live',status:'connected',detail:'Receiving methods checked; no invoice created.',methods:['lightning'],createdAt:new Date().toISOString(),verifiedAt:new Date().toISOString()};
+  return route.fulfill({status:201,json:{connection}});
+ });
+ await page.goto('/tests/fixtures/connections-ui.html');
+ await page.getByRole('button',{name:'Connect Minibits / Zeus / NWC wallet',exact:true}).click();
+ await expect(page.getByText('In Zeus use Custom permissions',{exact:false})).toBeVisible();
+ await page.getByLabel('Wallet',{exact:true}).selectOption('Zeus');
+ const secret=page.getByLabel('NWC receiving connection',{exact:true});await expect(secret).toHaveAttribute('type','password');await expect(secret).toHaveAttribute('autocomplete','off');await secret.fill(uri);
+ await page.getByRole('button',{name:'Verify & save connection',exact:true}).click();
+ await expect(page.getByText('Fictional Zeus',{exact:true})).toBeVisible();
+ expect(saved).toMatchObject({provider:'nwc',mode:'live',fields:{walletLabel:'Zeus',connectionUri:uri}});
+ await expect(page.locator('input[type="password"]')).toHaveCount(0);
+ expect(await page.evaluate(()=>JSON.stringify({...localStorage,...sessionStorage}))).not.toContain('nostr+walletconnect');
+ await page.reload();await expect(page.getByText('Fictional Zeus',{exact:true})).toBeVisible();
+});
 async function serve(page:Page,connections:unknown[]=[],options:{failLoad?:boolean;failSave?:boolean}={}){
   const calls:{method:string;path:string;body:unknown;csrf:string|undefined}[]=[];
   let current=[...connections],failed=false;

@@ -3,6 +3,12 @@
 Private invoices, checkout and client conversations, with self-hosted accounts
 and optional Bitcoin/fiat receiving connections.
 
+Connect an external **Minibits, Zeus or NWC wallet** for Lightning invoice
+creation and original-payment checks. The wallet can route through Cashu while
+Quiet Ledger records Lightning settlement. Pairing reads metadata only; keys
+and ecash stay in the wallet, with the NWC application credential encrypted in
+this instance. [NWC setup and permissions](docs/NWC.md).
+
 The optional **Real 21-sat payment** page stays inside the `marmot` demo. It uses an operator-configured receiving-only Coinos connection; other demo invoices remain simulations. A Cashu wallet can fund the Lightning invoice, and the receipt remains Lightning. [Demo receiving setup](docs/DEMO-LIVE-PAYMENT.md).
 
 [Private saved drafts](docs/INVOICE-DRAFTS.md) preserve unfinished invoice work

@@ -12,6 +12,8 @@ import type {ReceivingAdapter,ReceivingContext} from '../shared/receiving.js';
 import type {MethodId} from '../shared/payment-methods.js';
 import {connectionFetch,validateConnectionUrl} from './connection-transport.js';
 import {coinosCallbackAllowed} from '../integrations/coinos-callback.js';
+import {createNwcReceivingAdapter,parseNwcConnection,verifyNwcReceiving} from '../integrations/nwc-receiving.js';
+import {createNwcTransport,type NwcTransport} from './nwc-transport.js';
 
 const field=(key:string,label:string,type:ConnectionProviderField['type']='text',help?:string,required=true):ConnectionProviderField=>({key,label,type,required,...(help?{help}:{})});
 const choice=(key:string,label:string,values:string[]):ConnectionProviderField=>({...field(key,label,'select'),options:values.map(value=>({value,label:value}))});
@@ -19,6 +21,7 @@ const rpcFields=[field('rpcUrl','Public HTTPS wallet RPC endpoint','url','Only p
 const country=field('merchantCountry','Merchant country','text','Two-letter country code, such as CA, US or GB. Provider eligibility still applies.');
 const manualWarning='Save merchant-supplied receiving instructions. Confirm every payment independently; this does not connect to a bank API.';
 export const CONNECTION_PROVIDERS:ConnectionProviderDefinition[]=[
+  {id:'nwc',name:'Minibits / Zeus / NWC wallet',description:'Receive Lightning into your external wallet, including its Cashu wallet when enabled there. Your wallet must stay online. Quiet Ledger calls only receiving methods; restrict the connection in your wallet.',fields:[choice('walletLabel','Wallet',['Minibits','Zeus','Other NWC wallet']),field('connectionUri','NWC receiving connection','password','Paste the nostr+walletconnect link from your wallet. In Zeus use Custom permissions for get_info, make_invoice and lookup_invoice; Read Only cannot create invoices. Minibits currently uses budget-based connections that may grant spending elsewhere: restrict the budget, or use Lightning Address if you cannot issue a suitably restricted link. Quiet Ledger never calls Pay invoice or Sign message. The server operator can decrypt this connection secret.')],walletOptionIds:['nwc'],modes:['live'],verification:'automatic',methods:['lightning']},
   {id:'lightning-address',name:'Lightning Address',description:'Read public LNURL metadata, then create exact Lightning invoices when requested. Settlement proof depends on receiver support.',fields:[field('lightningAddress','Lightning Address','text','For example merchant@example.com. No private key or seed.')],walletOptionIds:['lnurl'],modes:['live'],verification:'automatic',methods:['lightning']},
   {id:'lnurl',name:'LNURL pay endpoint',description:'Public HTTPS LNURL-pay metadata and same-origin callbacks. Connecting reads metadata without creating an invoice.',fields:[field('url','LNURL-pay HTTPS endpoint','url')],walletOptionIds:['lnurl'],modes:['live'],verification:'automatic',methods:['lightning']},
   {id:'bitcoin-core',name:'Bitcoin Core',description:'Mainnet receiving through a synchronized wallet RPC. Receiving may allocate a new wallet address; never signs or sends.',fields:rpcFields,walletOptionIds:['bitcoin-core'],modes:['live'],verification:'automatic',methods:['bitcoin']},
@@ -36,7 +39,7 @@ export const CONNECTION_PROVIDERS:ConnectionProviderDefinition[]=[
 ];
 
 export interface NormalizedConnection {provider:string;label:string;mode:'live'|'test';fields:Record<string,string>}
-export interface ConnectionBuildOptions {id:string;publicOrigin:string;fetcher?:HttpFetch;/** Trusted local hosted fixture only; never accepted in tenant fields. */allowInsecureLoopback?:boolean;/** Internal fixture deadline; never accepted in tenant fields. */verificationTimeoutMs?:number}
+export interface ConnectionBuildOptions {id:string;publicOrigin:string;fetcher?:HttpFetch;/** Trusted internal transport injection; never accepted in tenant fields. */nwcTransport?:NwcTransport;/** Trusted local hosted fixture only; never accepted in tenant fields. */allowInsecureLoopback?:boolean;/** Internal fixture deadline; never accepted in tenant fields. */verificationTimeoutMs?:number}
 export interface ConnectionVerification {status:'connected'|'manual';detail:string;methods:MethodId[]}
 const invalid=()=>new Error('Invalid connection settings. Check the documented provider fields and public HTTPS endpoint.');
 const object=(value:unknown):value is Record<string,unknown>=>value!==null&&typeof value==='object'&&!Array.isArray(value);
@@ -61,6 +64,7 @@ function endpoint(value:string,originOnly=false):string {
 }
 function validateFields(provider:string,mode:'live'|'test',fields:Record<string,string>){
   const f=fields;
+  if(provider==='nwc'){if(mode!=='live')throw invalid();parseNwcConnection(f.connectionUri);}
   if(['bitcoin-core','watch-only','liquid'].includes(provider)){
     f.rpcUrl=endpoint(f.rpcUrl);
     if(f.minConfirmations&&!/^(?:[1-9]|[1-9][0-9]|1[0-3][0-9]|14[0-4])$/.test(f.minConfirmations))throw invalid();
@@ -110,6 +114,7 @@ export function normalizeConnection(input:unknown,options:ConnectionOriginOption
     }
     const normalized:NormalizedConnection={provider:definition.id,label:typeof input.label==='string'&&input.label.trim()?input.label.trim():definition.name,mode:input.mode as 'live'|'test',fields};
     if(normalized.provider==='cashu-external'&&isCashuSecretShaped(normalized.label))throw invalid();
+    if(normalized.provider==='nwc'&&(/nostr\+walletconnect:|secret=/i.test(normalized.label)||isCashuSecretShaped(normalized.label)))throw invalid();
     validateFields(normalized.provider,normalized.mode,fields);
     if(normalized.provider==='lnd')fields.invoiceHmacSecret=randomBytes(32).toString('hex');
     // Constructing an adapter validates provider-specific formats without network IO.
@@ -122,7 +127,8 @@ export function buildConnectionAdapter(connection:NormalizedConnection,options:C
   const {provider,mode,fields:f}=connection,fetcher=options.fetcher??connectionFetch,id=options.id;
   const definition=CONNECTION_PROVIDERS.find(row=>row.id===provider);if(!definition||!definition.modes.includes(mode))throw invalid();
   const shared={id,mode,fetcher};let adapter:ReceivingAdapter;
-  if(provider==='lightning-address'||provider==='lnurl')adapter=createLnurlAdapter({...shared,...(provider==='lightning-address'?{lightningAddress:f.lightningAddress}:{url:f.url})});
+  if(provider==='nwc')adapter=createNwcReceivingAdapter({id,connectionUri:f.connectionUri,transport:options.nwcTransport});
+  else if(provider==='lightning-address'||provider==='lnurl')adapter=createLnurlAdapter({...shared,...(provider==='lightning-address'?{lightningAddress:f.lightningAddress}:{url:f.url})});
   else if(provider==='bitcoin-core'||provider==='watch-only'||provider==='liquid')adapter=createCryptoAdapter({...shared,kind:provider==='liquid'?'liquid':'bitcoin-core',rpcUrl:f.rpcUrl,rpcUsername:f.rpcUsername,rpcPassword:f.rpcPassword,minConfirmations:f.minConfirmations?Number(f.minConfirmations):undefined,...(f.address?{address:f.address}:{})});
   else if(provider==='lnd')adapter=createCryptoAdapter({...shared,kind:'lnd',baseUrl:f.baseUrl,macaroonHex:f.macaroonHex,invoiceHmacSecret:f.invoiceHmacSecret});
   else if(provider==='bark')adapter=createArkAdapter({...shared,baseUrl:f.baseUrl,token:f.token,expectedServerPubkey:f.expectedServerPubkey,addressIndex:Number(f.addressIndex),expectedAddress:f.expectedAddress});
@@ -214,15 +220,19 @@ export async function verifyConnection(connection:NormalizedConnection,options:C
     const signal=init.signal?AbortSignal.any([controller.signal,init.signal]):controller.signal;
     return beforeAbort(underlying(url,{...init,signal}),signal);
   };
-  try{return await beforeAbort(verifyConnectionMetadata(connection,{...options,fetcher}),controller.signal);}
+  try{return await beforeAbort(verifyConnectionMetadata(connection,{...options,fetcher,nwcTransport:options.nwcTransport??(connection.provider==='nwc'?createNwcTransport({signal:controller.signal}):undefined)}),controller.signal);}
   catch{throw verificationUnavailable();}
   finally{clearTimeout(timer);controller.abort();}
 }
-/** No invoice, address allocation, checkout, trade, capture, signature or send is performed. */
+/** No invoice, address allocation, checkout, trade, capture, wallet signing or send is performed. */
 async function verifyConnectionMetadata(connection:NormalizedConnection,options:ConnectionBuildOptions):Promise<ConnectionVerification>{
   try{
     const adapter=buildConnectionAdapter(connection,options),{provider,fields:f}=connection,fetcher=options.fetcher??connectionFetch;
     const methods=[...adapter.methods];
+    if(provider==='nwc'){
+      await verifyNwcReceiving({connectionUri:f.connectionUri,transport:options.nwcTransport});
+      return {status:'connected',detail:'Authenticated mainnet NWC receiving methods checked. No invoice was created. Keep the wallet online; payments are verified through its original Lightning invoice, not native ecash proofs. Supported methods do not prove which permissions were granted: use a custom invoice-only connection.',methods};
+    }
     if(provider==='bank-instructions')return {status:'manual',detail:'Receiving instructions saved. Independently confirm each payment in your bank or provider; no bank API is connected.',methods};
     if(provider==='static-crypto')return {status:'manual',detail:'Dedicated public destination saved for manual confirmation. No address pool or automatic settlement proof is available; destination reuse across requests is blocked.',methods};
     if(provider==='cashu-external')return {status:'manual',detail:'External Cashu wallet instructions saved (self-hosted or third-party wallet). No mint request was made, no token or secret is held, and no funded readiness is claimed; import and verify each received ecash payment in your own wallet before confirming.',methods};

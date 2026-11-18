@@ -1,0 +1,20 @@
+import {test,expect} from '@playwright/test';
+import {fictionalNwcWallet} from './fixtures/nwc-wallet.js';
+test('actual saved NWC wallet to SAT invoice, payer checkout and one Lightning receipt',async({page})=>{
+ const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
+ await page.goto('/__fixture/enter');await expect(page.getByRole('heading',{name:'Connect once. Come back ready.',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Connect Minibits / Zeus / NWC wallet',exact:true}).click();
+ await page.getByLabel('Wallet',{exact:true}).selectOption('Zeus');await page.getByLabel('NWC receiving connection',{exact:true}).fill(fictionalNwcWallet().uri);
+ await page.getByRole('button',{name:'Verify & save connection',exact:true}).click();await expect(page.getByText('Connection saved to your account.',{exact:false})).toBeVisible();
+ expect((await(await page.request.get('/__fixture/status')).json()).calls).toEqual(['get_info']);await page.reload();await expect(page.getByText('Keep the receiving wallet online.',{exact:true})).toBeVisible();
+ await page.goto('/invoices/new');await page.getByLabel('Customer name',{exact:true}).fill('Fictional NWC client');await page.getByLabel('Invoice title',{exact:true}).fill('Fictional external wallet service');await page.getByLabel('Item 1 description',{exact:true}).fill('Fictional work');await page.getByLabel('Item 1 unit price',{exact:true}).fill('2100');await page.getByLabel('Tax rate (%)',{exact:true}).fill('0');await page.getByRole('combobox',{name:'Invoice currency',exact:true}).selectOption('SAT');
+ await page.getByRole('button',{name:'Create invoice',exact:true}).click();await expect(page).toHaveURL(/\/invoices$/);
+ const invoice=(await(await page.request.get('/api/invoices')).json()).invoices[0];await page.goto('/pay/'+invoice.token);await page.getByRole('combobox',{name:'Payment method',exact:true}).selectOption('lightning');await page.getByRole('button',{name:'Continue with live payment',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'A place for your payment.',exact:true})).toBeVisible();await expect(page.getByText('2,100 sats',{exact:true})).toBeVisible();
+ await page.setViewportSize({width:390,height:844});await page.getByRole('button',{name:'Check payment',exact:true}).click();await expect(page.getByRole('heading',{name:'A place for your payment.',exact:true})).toBeVisible();
+ await page.request.post('/__fixture/paid');
+ await expect.poll(async()=>{const state=await(await page.request.get('/__fixture/status')).json();const checks=state.calls.filter((x:string)=>x==='lookup_invoice').length;if(checks<2)await page.getByRole('button',{name:'Check payment',exact:true}).click();return checks;},{intervals:[1000],timeout:8000}).toBe(2);
+ await expect(page.getByRole('heading',{name:'Payment verified.',exact:true})).toBeVisible();
+ const paid=await(await page.request.get('/api/invoices/'+invoice.id)).json();expect(paid.nativePayment.verification).toBe('provider');expect(JSON.stringify(paid.nativePayment)).not.toContain(fictionalNwcWallet().walletPubkey);
+ const calls=(await(await page.request.get('/__fixture/status')).json()).calls;expect(calls.filter((x:string)=>x==='make_invoice')).toHaveLength(1);expect(calls.some((x:string)=>['pay_invoice','sign_message','get_balance','list_transactions'].includes(x))).toBe(false);expect(errors).toEqual([]);
+});

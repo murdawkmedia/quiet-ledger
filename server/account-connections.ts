@@ -5,11 +5,12 @@ import {CONNECTION_PROVIDERS,normalizeConnection,buildConnectionAdapter,verifyCo
 import type {ConnectionSummary} from '../shared/connections.js';
 import type {ReceivingAdapter} from '../shared/receiving.js';
 import type {HttpFetch} from '../integrations/http.js';
+import type {NwcTransport} from './nwc-transport.js';
 
 const TABLE='account_connections',UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const unavailable=()=>new DomainError(502,'The provider connection could not be verified. Check its details, permissions and network, then try again. No payment was created.');
 interface StoredConnection extends NormalizedConnection {id:string;workspace:string;createdAt:string;verifiedAt?:string;status:ConnectionSummary['status'];detail:string;methods:ConnectionSummary['methods']}
-interface Options {store:Store;publicOrigin:string;now:()=>Date;getSession:(req:Request,res:Response)=>StoredSession|undefined;fetcher?:HttpFetch;allowInsecureLoopback?:boolean}
+interface Options {store:Store;publicOrigin:string;now:()=>Date;getSession:(req:Request,res:Response)=>StoredSession|undefined;fetcher?:HttpFetch;nwcTransport?:NwcTransport;allowInsecureLoopback?:boolean}
 export function createAccountConnections(options:Options){
  const {store,publicOrigin,now}=options;
  if(!store.encrypted)throw new Error('Account connections require encrypted private storage.');
@@ -52,7 +53,7 @@ export function createAccountConnections(options:Options){
    const id='conn-'+randomUUID();let normalized:NormalizedConnection;
    try{normalized=normalizeConnection(req.body,{id,publicOrigin,allowInsecureLoopback:options.allowInsecureLoopback});}catch{throw new DomainError(400,'Connection fields are invalid. Use the fields and network listed for this provider.');}
    let verified:Awaited<ReturnType<typeof verifyConnection>>;
-   try{verified=await verifyConnection(normalized,{id,publicOrigin,fetcher:options.fetcher,allowInsecureLoopback:options.allowInsecureLoopback});}catch{throw unavailable();}
+   try{verified=await verifyConnection(normalized,{id,publicOrigin,fetcher:options.fetcher,nwcTransport:options.nwcTransport,allowInsecureLoopback:options.allowInsecureLoopback});}catch{throw unavailable();}
    return store.idempotent('connections:'+workspace,retry,req.body,201,()=>{
     checkBudget(workspace);const createdAt=now().toISOString();const value:StoredConnection={...normalized,id,workspace,createdAt,verifiedAt:createdAt,...verified};
     store.db.prepare(`INSERT INTO ${TABLE}(id,workspace,created_at,data) VALUES(?,?,?,?)`).run(id,workspace,createdAt,store.encode(value,TABLE,id,workspace));
@@ -64,7 +65,7 @@ export function createAccountConnections(options:Options){
   const workspace=identity(req,res).workspace,id=String(req.params.id);if(!req.body||typeof req.body!=='object'||Array.isArray(req.body)||Object.keys(req.body).length)throw new DomainError(400,'Connection checks accept an empty object.');
   const result=await exclusive(workspace,async()=>{
    const saved=read(id,workspace);let verified:Awaited<ReturnType<typeof verifyConnection>>|undefined;
-   try{verified=await verifyConnection(saved,{id,publicOrigin,fetcher:options.fetcher,allowInsecureLoopback:options.allowInsecureLoopback});}catch{}
+   try{verified=await verifyConnection(saved,{id,publicOrigin,fetcher:options.fetcher,nwcTransport:options.nwcTransport,allowInsecureLoopback:options.allowInsecureLoopback});}catch{}
    const value=store.transaction(()=>{const current=read(id,workspace);store.assertWriteBudget();if(verified){current.status=verified.status;current.detail=verified.detail;current.methods=verified.methods;current.verifiedAt=now().toISOString();}else{current.status='unavailable';current.detail='The last provider check failed. Check the provider account and network, then recheck this saved connection.';}
     store.db.prepare(`UPDATE ${TABLE} SET data=? WHERE id=? AND workspace=?`).run(store.encode(current,TABLE,id,workspace),id,workspace);return current;});return summary(value);
   });res.json({connection:result});
@@ -73,7 +74,7 @@ export function createAccountConnections(options:Options){
  function revision(workspace:string){return createHash('sha256').update(JSON.stringify(rows(workspace))).digest('hex');}
  function adaptersForWorkspace(workspace:string):ReceivingAdapter[]{
   return rows(workspace).map(row=>read(String(row.id),workspace)).filter(value=>value.status!=='unavailable').map(value=>{
-   const adapter=buildConnectionAdapter(value,{id:value.id,publicOrigin,fetcher:options.fetcher,allowInsecureLoopback:options.allowInsecureLoopback});
+   const adapter=buildConnectionAdapter(value,{id:value.id,publicOrigin,fetcher:options.fetcher,nwcTransport:options.nwcTransport,allowInsecureLoopback:options.allowInsecureLoopback});
    function active(){const current=read(value.id,workspace);if(current.status==='unavailable')throw new DomainError(503,'Recheck this connection before receiving.');}
    return {...adapter,label:CONNECTION_PROVIDERS.find(provider=>provider.id===value.provider)?.name??'Merchant receiving',async create(context){active();return adapter.create(context);},async check(context,intent,evidence){active();return adapter.check(context,intent,evidence);},...(adapter.recover?{async recover(context:Parameters<NonNullable<ReceivingAdapter['recover']>>[0]){active();return adapter.recover!(context);}}:{})};
   });

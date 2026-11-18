@@ -23,6 +23,11 @@ receiving details you intend to share.
 
 ## Available setup forms
 
+For Minibits, Zeus and other NWC wallets, see [receiving setup and permissions](NWC.md).
+The wallet must remain online. The NWC credential is an application secret;
+Quiet Ledger only calls receiving methods, but wallet-granted permissions may
+be broader. The receipt stays Lightning even when the wallet routes through Cashu.
+
 | Connection | Details needed | What remains conditional |
 | --- | --- | --- |
 | Lightning Address | Existing `name@domain` receiver | Receiver must support the required metadata and payment-proof protocol for automatic settlement |

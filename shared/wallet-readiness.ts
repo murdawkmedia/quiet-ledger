@@ -33,10 +33,10 @@ const LNURL_FAMILY=['lightning-address','lnurl'];
 const LANES:LaneSpec[]=[
   {walletOptionId:'bitcoin',name:'Bitcoin on-chain',category:'Bitcoin',method:'bitcoin',providerIds:['bitcoin-core','watch-only','static-crypto'],
     manualDetail:()=> 'Saved receiving instructions have no automatic metadata check and never pass one. Confirm each received transaction yourself; a saved address is a single dedicated allocation, not an address pool.'},
-  {walletOptionId:'lightning',name:'Lightning',category:'Lightning',method:'lightning',providerIds:['lightning-address','lnurl','lnd'],
+  {walletOptionId:'lightning',name:'Lightning',category:'Lightning',method:'lightning',providerIds:['lightning-address','lnurl','lnd','nwc'],
     manualDetail:connected=>connected.some(id=>LNURL_FAMILY.includes(id))
       ?'Lightning Address and LNURL need settlement-proof support for automatic verification. If your receiver does not provide it, review the payment in your owner workspace. LND checks exact invoice settlement automatically.'
-      :'Use the invoice payment check to verify exact LND settlement.'},
+      :connected.includes('nwc')?'Keep your NWC wallet online. Use the original Lightning invoice payment check before expiry; unavailable or late checks require review. A Cashu-routed wallet still produces a Lightning receipt.':'Use the invoice payment check to verify exact LND settlement.'},
   {walletOptionId:'ark',name:'Ark via Bark',category:'Ark',method:'ark',providerIds:['bark'],
     manualDetail:()=> 'Ark VTXO observations need manual invoice attribution and no address pool is created. The saved Bark connection checks only the pinned server public key and your existing indexed address; confirm the allocation for every payment yourself, even after a successful metadata check.'},
   {walletOptionId:'cashu',name:'Cashu ecash',category:'Ecash',method:'cashu',providerIds:['cashu-external'],
@@ -99,6 +99,7 @@ export function walletReadinessLanes(input:WalletReadinessInput):WalletLaneReadi
       steps.push({id:`${spec.walletOptionId}-metadata`,phase:'metadata',state:metadataState,
         label:metadataVerified?(mixed?'Metadata check passed with failed rows':'Metadata check passed'):metadataState==='attention'?(unavailableCount>0?'Last metadata check failed':'Manual instructions only'):'Run a metadata check',
         detail:metadataDetail});
+      if(spec.walletOptionId==='lightning'&&active.some(entry=>entry.connection.provider==='nwc'))steps.push({id:'lightning-nwc-online',phase:'manual-check',state:'attention',label:'Keep the receiving wallet online',detail:'NWC needs your wallet to answer invoice requests and checks. Check payments before invoice expiry. Cashu routing is configured in the wallet; the verified receipt stays Lightning, and this screen does not verify destination ecash proofs.'});
       if(requiresManualConfirmation){
         const connectedProviders=active.map(entry=>entry.connection.provider);
         steps.push({id:`${spec.walletOptionId}-manual-check`,phase:'manual-check',state:'attention',label:'Needs your confirmation',
