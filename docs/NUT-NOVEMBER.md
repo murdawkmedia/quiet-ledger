@@ -4,9 +4,11 @@ Quiet Ledger is an open-source, self-hostable invoicing workspace for creators
 and small businesses. Our November focus is making Cashu useful for ordinary
 invoices and, later, voluntary creator support.
 
-This is work in progress. The existing Cashu checkout is a simulation, not token
-redemption. No real Cashu receiving, minting, swapping or melting is implemented
-in this baseline. Keep that distinction when evaluating the demo.
+This is work in progress. The fictional invoice demo remains simulated. A separate
+live Lightning checkout now accepts a Cashu token in the payer’s browser, quotes
+mint fees, saves private recovery state and melts once into the merchant’s exact
+invoice. See [Cashu checkout](CASHU-WALLET.md). Controlled cryptographic/browser
+fixtures pass; an actual funded mint payment remains unqualified.
 
 Since November 15, SAT invoices can also be settled through manual
 [external-wallet Cashu receiving](CASHU-EXTERNAL-WALLET.md): the owner chooses
@@ -15,7 +17,7 @@ mint and nonsecret transfer instructions, the payer sends ecash entirely
 outside the app, and the owner's explicit confirmation records one Cashu
 receipt. Both hosting choices share the same manual verification level. That
 path performs no network request, holds no tokens or secrets, and claims no
-funded acceptance; direct token settlement stays unimplemented.
+funded acceptance. This manual path is separate from browser ecash-to-Lightning conversion.
 
 ## What exists at entry
 

@@ -2,7 +2,7 @@
 
 Sign in to the hackathon demo with `marmot`, then choose **Real 21-sat payment** in its navigation. This is an optional, voluntary payment to the configured Coinos receiver. The client/accountant conversation and its invoices remain fictional simulations.
 
-Check the real-funds acknowledgement before creating one 21-sat Lightning invoice. Copy it or choose **Pay from a Cashu wallet** and scan it in Minibits/Zeus using Pay Lightning. Check wallet/mint fees before paying. Cashu is the payer's funding source; Coinos receives Lightning and the receipt says Lightning. The app cannot tell how the payer funded it and does not collect ecash tokens or wallet keys.
+Check the real-funds acknowledgement before creating one 21-sat Lightning invoice. Copy it or choose **Pay from a Cashu wallet** and scan it in Minibits/Zeus using Pay Lightning. Check wallet/mint fees before paying. Cashu is the payer's funding source; Coinos receives Lightning and the receipt says Lightning. The server cannot tell how the payer funded it and never receives ecash tokens or wallet keys. Alternatively choose **Pay with ecash here**, paste an unlocked token from the supported Minibits or Coinos mint, review fees, save a private recovery file and confirm in this browser. The mint pays the exact existing Lightning invoice; the browser returns ecash change. See [Cashu checkout and recovery](CASHU-WALLET.md).
 
 **Check payment** asks the receiving provider about the original invoice. A receipt appears only for verified matching provider state. An uncertain, expired or mismatched request stays visibly unresolved; refresh/retry never silently creates another invoice. Simulate payment and public manual-confirm actions cannot settle the real sample. A visit gets one original sample, retained independently of fictional-demo cleanup.
 
@@ -18,4 +18,4 @@ Coinos token provisioning is an explicit account-configuration action; its API a
 
 ## Limits
 
-Native ecash custody and direct Cashu redemption are not implemented by this page. A connected receiver or controlled test is not a funded payment acceptance claim. No funds move just by opening the page or saving configuration. Retained real samples have a fixed capacity cap and fail closed when full rather than silently deleting financial evidence. Demo visitors have no API-key, provider-management, transfer or withdrawal authority.
+The optional browser flow redeems ecash directly at its mint. Server-owned ecash custody and native Cashu merchant receipts are not implemented. A connected receiver or controlled test is not a funded payment acceptance claim. No funds move just by opening the page or saving configuration. Retained real samples have a fixed capacity cap and fail closed when full rather than silently deleting financial evidence. Demo visitors have no API-key, provider-management, transfer or withdrawal authority.

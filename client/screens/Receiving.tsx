@@ -5,7 +5,7 @@ import {receivingRequestExpiry} from '../../shared/receiving';
 import type {MethodId} from '../../shared/payment-methods';
 import {api,date,downloadJson,methodLabel,money,post} from '../api';
 import {Badge,Brand,CopyButton,ErrorMessage,Loading,PrivacyNote} from '../components';
-import {canGuideCashuWallet,CashuWalletHandoff} from './CashuWalletHandoff';
+import {CashuPaymentTools} from './CashuWalletHandoff';
 
 export type AdapterView={label?:string;id:string;methods:string[];mode:'live'|'test';configured?:boolean;verified?:boolean;supportedCurrencies?:AdapterCurrency[];supportedCurrenciesByMethod?:Partial<Record<MethodId,AdapterCurrency[]>>};
 export type ReceiveRequest=ReceivingRecord&{receiptToken?:string;nativePayment?:{asset:string;atomicAmount:string;network:string}};
@@ -34,7 +34,6 @@ export function ReceivingDetails({request}:{request:ReceiveRequest}){
     {expired?<div className="review-message" role="status"><strong>Payment request expired</strong><p>Ask the owner for a fresh request before sending. If you already paid, you can still check its status for review.</p></div>:request.intent?.request?<div className="payment-request receiving-address"><code>{request.intent.request}</code><CopyButton value={request.intent.request} label="Copy payment request"/></div>:null}
     {!expired?request.intent?.instructions?.map((instruction,index)=><div className="receive-instruction" key={index}><strong>{instruction.label}</strong><p>{instruction.value}</p></div>):null}
     {!expired&&request.method==='cashu'?<div className="receive-instruction"><strong>Before you send ecash</strong><p>Use your own wallet on the exact mint shown above; there is no scan-to-pay code on this page. The merchant confirms receipt in their external wallet after importing and verifying the ecash — checking here never credits the invoice. Keep ecash tokens, keys and recovery words in your wallet.</p></div>:null}
-    {!expired&&canGuideCashuWallet(request)?<CashuWalletHandoff key={`${request.id}:${request.intent!.request}`} paymentRequest={request.intent!.request!}/>:null}
     {url&&!expired?<a href={url} target="_blank" rel="noreferrer" className="button primary full">Open secure provider checkout<ArrowUpRight size={16}/></a>:null}
   </div>;
 }
@@ -51,6 +50,7 @@ export function ReceivePage({token}:{token:string}){
       <div className="receipt-success">{paid?<CheckCircle2 size={28}/>:<Wallet size={28}/>}<span>{paid?'PAYMENT VERIFIED':request.reviewReason?'OWNER REVIEW REQUIRED':'YOUR PRIVATE PAYMENT REQUEST'}</span></div>
       <h1>{paid?'Payment verified.':request.reviewReason?'Awaiting payment review.':'A place for your payment.'}</h1><p className="receipt-subtitle">Invoice {request.invoiceNumber}{paid?'':live?' · Live payment · real funds':' · Test environment · no real funds'}</p>
       {paid?<><div className="receipt-amount">{money(request.receipt!.amount,request.receipt!.currency)}<span>{request.receipt!.currency}</span></div><dl className="receipt-facts"><div><dt>Receipt number</dt><dd>{request.receipt!.number}</dd></div><div><dt>Method</dt><dd>{methodLabel(request.method)}</dd></div><div><dt>Verified</dt><dd>{date(request.receipt!.verifiedAt)}</dd></div><div><dt>Mode</dt><dd>{live?'Live payment · real funds':'Test payment · no real funds'}</dd></div></dl><button className="button primary" onClick={()=>downloadJson(request.receipt,`${request.receipt!.number}.json`)}><Download size={17}/>Download {live?'payment':'test'} receipt</button></>:<><ReceivingDetails request={request}/>{request.reviewReason?<div className="review-message" role="status"><strong>Awaiting owner review</strong><p>{request.reviewReason}</p><p>A payment report or provider approval alone is not a paid receipt.</p></div>:null}{request.status==='creation_pending'?<p className="receive-instruction">The owner is recovering this saved request. Wait for an available payment request before sending.</p>:<button className="button secondary full" disabled={busy} onClick={()=>void check()}><RefreshCw size={16}/>{busy?'Checking payment…':'Check payment'}</button>}</>}
+      <CashuPaymentTools key={request.id} request={request} onSettled={()=>void check()}/>
       {error?<ErrorMessage message={error}/>:null}<PrivacyNote>{live?'Use the exact asset, network and amount shown. A receipt appears only after verification. This page never asks for wallet keys or a recovery phrase.':'This test request and receipt stay separate from real payments and the simulated payout balance.'}</PrivacyNote>
     </main>}<footer className="public-footer"><ShieldCheck size={14}/>A private payment page by Quiet Ledger.</footer></div>;
 }

@@ -1,4 +1,5 @@
 import {MARMOT_RELAY_CSP} from '../shared/marmot-relays.ts';
+import {CASHU_BROWSER_MINT_CSP} from '../shared/cashu-browser-mints.ts';
 import {build} from 'esbuild';
 import {mkdir,writeFile,readFile,copyFile,cp,rm} from 'node:fs/promises';
 import {resolve,relative,dirname,parse} from 'node:path';
@@ -15,7 +16,7 @@ await writeFile(resolve(output,'public/_headers'),`/*
   Referrer-Policy: no-referrer
   X-Frame-Options: DENY
   Permissions-Policy: camera=(), microphone=(), geolocation=()
-  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ${MARMOT_RELAY_CSP}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ${MARMOT_RELAY_CSP} ${CASHU_BROWSER_MINT_CSP}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'
   X-Robots-Tag: noindex, nofollow
 /index.html
   Cache-Control: no-store
@@ -51,6 +52,7 @@ await dependencyNotices(resolve(root,'node_modules/@internet-privacy/marmot-ts')
 // The pinned Cashu recovery SDK and its exact transitive dependency tree. This
 // walks nested installs too, so the MIT/Apache notices are never inferred.
 await dependencyNotices(resolve(root,'node_modules/@cashu/cashu-ts'));
+await dependencyNotices(resolve(root,'node_modules/@cashu/cashu-ts-browser'));
 await writeFile(resolve(output,'public/THIRD-PARTY-LICENSES.txt'),notices.join('\n\n'));
 
 for(const file of ['package.json','package-lock.json'])await copyFile(file,resolve(output,file));

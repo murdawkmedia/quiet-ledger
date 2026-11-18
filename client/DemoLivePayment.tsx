@@ -2,7 +2,7 @@ import {useEffect,useRef,useState} from 'react';
 import type {ReceivingRecord} from '../shared/receiving';
 import {api,post,actionKey} from './api';
 import {sanitizeDemoLiveRequest,type DemoLivePaymentView} from '../shared/demo-live-payment';
-import {canGuideCashuWallet,CashuWalletHandoff} from './screens/CashuWalletHandoff';
+import {CashuPaymentTools} from './screens/CashuWalletHandoff';
 import {CopyButton} from './components';
 
 function checkedView(value:DemoLivePaymentView):DemoLivePaymentView {
@@ -43,11 +43,6 @@ export function DemoLivePayment(){
   </section>;
   const request=view.request;
   const expired=Boolean(request&&request.status!=='paid'&&expiry!==undefined&&expiry<=Math.max(clock,Date.now()));
-  const compatible=()=>request&&request.intent?.request?canGuideCashuWallet({
-    mode:request.mode,method:request.method,status:request.status,expectedAtomic:request.expectedAtomic,
-    expiresAt:request.expiresAt,reviewReason:request.reviewReason,creationUncertain:request.creationUncertain,
-    intent:request.intent,
-  } as unknown as ReceivingRecord):false;
   async function run(operation:()=>Promise<DemoLivePaymentView>){
     setBusy(true);setError(undefined);
     try{setView(checkedView(await operation()));setClock(Date.now());}
@@ -97,8 +92,8 @@ export function DemoLivePayment(){
       <div className="receive-instruction">
         <p>Pay exactly 21 sats from a Lightning wallet (Minibits or Zeus can melt ecash to this invoice; fees vary):</p>
         <div className="payment-request receiving-address"><code>{request.intent.request}</code><CopyButton value={request.intent.request} label="Copy Lightning invoice"/></div>
-        {compatible()?<CashuWalletHandoff paymentRequest={request.intent.request}/>:null}
       </div>:null}
+    {request?<CashuPaymentTools key={request.id} request={request as unknown as ReceivingRecord} onSettled={()=>void check()}/>:null}
     {expired?<p role="status">This visit's invoice expired and stays saved. Start a fresh demo visit for a new sample; nothing is recreated here automatically.</p>:null}
     {request?.reviewReason?<p role="alert">{request.reviewReason}</p>:null}
     {request?.status==='creation_pending'?<button type="button" className="button secondary full" disabled={busy} onClick={refresh}>{busy?'Refreshing…':'Refresh saved invoice'}</button>:null}

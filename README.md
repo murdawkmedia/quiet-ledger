@@ -9,6 +9,11 @@ Quiet Ledger records Lightning settlement. Pairing reads metadata only; keys
 and ecash stay in the wallet, with the NWC application credential encrypted in
 this instance. [NWC setup and permissions](docs/NWC.md).
 
+A Lightning checkout also offers **Pay with ecash here**: paste an unlocked
+Minibits/Coinos-mint token in the browser, review the maximum fee, save private
+recovery and confirm a Cashu-to-Lightning payment. Change stays recoverable after
+the Lightning receipt. [Payment and recovery](docs/CASHU-WALLET.md).
+
 The optional **Real 21-sat payment** page stays inside the `marmot` demo. It uses an operator-configured receiving-only Coinos connection; other demo invoices remain simulations. A Cashu wallet can fund the Lightning invoice, and the receipt remains Lightning. [Demo receiving setup](docs/DEMO-LIVE-PAYMENT.md).
 
 [Private saved drafts](docs/INVOICE-DRAFTS.md) preserve unfinished invoice work
@@ -73,10 +78,11 @@ The entry is work in progress. A [Cashu wallet guide](docs/CASHU-WALLET.md) now
 reuses verified Lightning invoices; receipts stay Lightning. SAT invoices can
 also be settled by manual [external-wallet Cashu
 receiving](docs/CASHU-EXTERNAL-WALLET.md) with owner-confirmed receipts and no
-token custody. Automatic ecash validation and redemption remain unimplemented. An
+token custody. The browser conversion validates and redeems payer proofs directly at the mint;
+no server-owned Cashu wallet is activated. An
 [internal journal-to-invoice
 settlement boundary](docs/CASHU-INVOICE-INTAKE.md) is fixture-tested, but no native
-merchant wallet, token input or custody is activated.
+merchant wallet or server token input/custody is activated.
 
 ## Features and boundaries
 
