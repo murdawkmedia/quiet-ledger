@@ -222,3 +222,24 @@ test('failure to save a send intent cannot leave a false Sent message after rest
   await a.dispose();a=await module.createProductionMarmot(aOptions);assert.equal(a.messages(group.id).length,0);await a.sync();await b.sync();assert.equal(b.messages(group.id).length,0);
  }finally{await a.dispose();await b.dispose();}
 });
+
+test('a dedicated messaging identity advertises KeyPackage discovery on its NIP-65 write relays',async()=>{
+ const {a,b,relay,aOptions}=await pair('external-discovery');
+ try{
+  await a.ensurePublished();
+  const published=relay.events.filter(event=>event.pubkey===a.pubkey);
+  const outbox=published.find(event=>event.kind===10002);
+  assert.ok(outbox,'An external peer needs a signed NIP-65 list to find this KeyPackage.');
+  assert.deepEqual(outbox.tags,relays.map(url=>['r',url,'write']));
+  assert.ok(published.some(event=>event.kind===10050));
+  assert.ok(published.some(event=>event.kind===30443));
+  await a.ensurePublished();
+  assert.equal(relay.attempts.filter(event=>event.kind===10002&&event.pubkey===a.pubkey).length,1);
+
+  const otherRoutes=[['r','wss://external.example.org/'],['r',relays[0],'read']];
+  relay.additional.push(finalizeEvent({kind:10002,tags:otherRoutes,content:'',created_at:outbox.created_at+1},aOptions.secretKey));
+  await a.ensurePublished();
+  assert.equal(relay.attempts.filter(event=>event.kind===10002&&event.pubkey===a.pubkey).length,1,
+    'Quiet Ledger must leave a relay list already managed by another client intact.');
+ }finally{await a.dispose();await b.dispose();}
+});

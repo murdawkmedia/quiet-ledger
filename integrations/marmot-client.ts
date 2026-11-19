@@ -164,7 +164,20 @@ export async function createProductionMarmot(options:ProductionMarmotOptions):Pr
    await flush();
   };
   return{pubkey,deviceId,
-   ensurePublished:()=>serial(async()=>{await sdk!.keyPackages.ensurePublished({relays,client:'Quiet Ledger native messaging'});const inbox=finalizeEvent({kind:10050,created_at:Math.floor(Date.now()/1000),tags:relays.map(relay=>['relay',relay]),content:''},secret),result=await network.publish(relays,inbox);if(!Object.values(result).some(value=>value.ok))throw new Error('Inbox relays did not acknowledge publication.');}),
+   ensurePublished:()=>serial(async()=>{
+    // The current Marmot profile locates KeyPackages via the account's NIP-65
+    // write relays. Leave an existing, separately managed list in place.
+    const existing=await network.request(relays,[{kinds:[10002],authors:[pubkey],limit:1}]);
+    if(!existing.length){
+     const outbox=finalizeEvent({kind:10002,created_at:Math.floor(Date.now()/1000),tags:relays.map(relay=>['r',relay,'write']),content:''},secret);
+     const result=await network.publish(relays,outbox);
+     if(!Object.values(result).some(value=>value.ok))throw new Error('KeyPackage discovery relays did not acknowledge publication.');
+    }
+    await sdk!.keyPackages.ensurePublished({relays,client:'Quiet Ledger native messaging'});
+    const inbox=finalizeEvent({kind:10050,created_at:Math.floor(Date.now()/1000),tags:relays.map(relay=>['relay',relay]),content:''},secret);
+    const result=await network.publish(relays,inbox);
+    if(!Object.values(result).some(value=>value.ok))throw new Error('Inbox relays did not acknowledge publication.');
+   }),
    invite:(peer,request={})=>serial(async()=>{
     await recoverPendingInvite();
     peerKey(peer);const context=request.context??'dm:'+peer;if(typeof context!=='string'||!context.length||context.length>128||/[\u0000-\u001f\u007f]/.test(context))throw new Error('A bounded private conversation context is required.');

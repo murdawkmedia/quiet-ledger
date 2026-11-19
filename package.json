@@ -26,6 +26,7 @@
     "test:e2e:email": "playwright test --config tests/invoice-email-browser.config.ts",
     "test:e2e:business": "playwright test --config tests/invoice-editor-ui.config.ts && playwright test --config tests/client-threads-browser.config.ts",
     "test:e2e:messages": "playwright test --config tests/production-messages-browser.config.ts",
+    "test:interop:amy": "node --import tsx tests/amy-marmot-interop.ts",
     "test:e2e:inbox": "playwright test --config tests/email-inbox-browser.config.ts"
   },
   "dependencies": {

@@ -3,7 +3,7 @@ import type {NostrNetworkInterface,PublishResponse} from '@internet-privacy/marm
 import {matchFilters,verifyEvent,type Event,type Filter} from 'nostr-tools';
 
 export const DEFAULT_MARMOT_RELAYS=PUBLIC_MARMOT_RELAY_ORIGINS.map(origin=>origin+'/');
-const allowedKinds=new Set([30443,1059,445,5,10050]),hex=/^[0-9a-f]{64}$/;
+const allowedKinds=new Set([30443,1059,445,5,10002,10050]),hex=/^[0-9a-f]{64}$/;
 const bytes=(text:string)=>new TextEncoder().encode(text).length;
 function relayUrl(value:string):string{
  const url=new URL(value),host=url.hostname.toLowerCase();

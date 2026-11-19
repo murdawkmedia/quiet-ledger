@@ -167,6 +167,8 @@ python3 -m unittest discover -s tests -p 'test_*.py'
 ```
 
 Native core tests exchange real MLS ciphertext between independent SDK peers.
+The [Amy interoperability check](docs/AMY-INTEROP.md) adds the Amethyst CLI
+as a separate implementation on an isolated relay.
 The production messaging browser checks use two independent browser participants
 with intercepted WSS relays. They do not test an installed White Noise client or
 publish to public relays. Mail checks use controlled SMTP/IMAP transports.
