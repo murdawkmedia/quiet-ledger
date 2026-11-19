@@ -33,7 +33,7 @@ function runtime(directory: string, port: number, preload?: string) {
   args.push('server/index.ts');
   const child = spawn(process.execPath, args, {
     cwd: resolve('.'),
-    env: { PATH: process.env.PATH, NODE_ENV: 'production', DATA_DIR: directory, HOST: '127.0.0.1', PORT: String(port),
+    env: { TMPDIR: directory, PATH: process.env.PATH, NODE_ENV: 'production', DATA_DIR: directory, HOST: '127.0.0.1', PORT: String(port),
       ...(preload ? { SQUARE_SANDBOX_TOKEN_FILE: join(directory, 'synthetic-square-token') } : {}) },
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
   });

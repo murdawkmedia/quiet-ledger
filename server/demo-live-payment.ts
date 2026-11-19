@@ -90,6 +90,13 @@ export class DemoLivePayments {
     }
     return record;
   }
+  async detect(liveWorkspace:string,requestId:string):Promise<boolean>{
+    const row=this.store.db.prepare(`SELECT demo_workspace FROM ${table} WHERE live_workspace=?`).get(liveWorkspace);
+    if(!row)return false;
+    const mapping=this.mapping(String(row.demo_workspace));
+    if(mapping&&this.mappedRequest(mapping)?.id===requestId)await this.receiving.check(requestId,liveWorkspace);
+    return true;
+  }
   view(workspace:string):DemoLivePaymentView {
     this.assertVisit(workspace);
     const mapping=this.mapping(workspace);

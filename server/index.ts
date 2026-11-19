@@ -61,10 +61,17 @@ if(hostedRuntime){
   if(hostedRuntime.selfHosted)server.on('upgrade',req=>requestApp.locals.prepareUpgradeRequest(req));
   app.locals.demoTeam?.attachRelay(server,{proxySecret:hostedRuntime.hosted.proxySecret});
 }
+let detection:Promise<void>|undefined;
+const detectionTimer=setInterval(()=>{
+  if(!detection)detection=Promise.resolve().then(()=>app.locals.detectPayments()).catch(()=>console.error('Payment detection sweep unavailable')).finally(()=>{detection=undefined;});
+},10000);
+detectionTimer.unref();
 let closing = false;
 async function shutdown() {
   if (closing) return;
   closing = true;
+  clearInterval(detectionTimer);
+  await detection;
   await app.locals.demoTeam?.close();
   await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));
   await vite?.close();

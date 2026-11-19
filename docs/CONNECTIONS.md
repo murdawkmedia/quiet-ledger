@@ -134,3 +134,7 @@ Provider readback tests use fictional transports. Actual public-URL acceptance
 verified saved instructions, logout/login persistence, tenant isolation,
 customer checkout, disconnect and all nine remote MCP tools. A real funded
 Bitcoin/fiat payment has not been accepted. Current verification is documented by the reproducible test commands in the README.
+
+### Automatic Lightning receipts
+
+The running server periodically checks existing live Lightning requests that carry a provider-verifiable invoice. It uses the saved receiving connection even after the payer closes checkout. An open checkout refreshes its status and displays the receipt once the provider confirms settlement. A slow or unavailable wallet can delay confirmation. Expired requests and mismatched settlement evidence retain their existing review rules.

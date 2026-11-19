@@ -24,7 +24,7 @@ import {METHOD_DEFINITIONS,PAYMENT_METHOD_IDS,methodInfo,receivedValue,canFundPa
 import type {MethodId} from '../shared/payment-methods.js';
 import {WALLET_OPTIONS} from '../shared/wallet-options.js';
 import type {ReceivingAdapter} from '../shared/receiving.js';
-import {receivingAdapterSupportsCurrency} from '../shared/receiving.js';
+import {receivingRequestExpiry,type ReceivingRecord,receivingAdapterSupportsCurrency} from '../shared/receiving.js';
 import {ReceivingService,type QuoteReceiving} from './receiving-service.js';
 import {InvoiceLedger} from './invoice-ledger.js';
 import {MethodPriceAgreements} from './method-pricing.js';
@@ -181,6 +181,23 @@ export function createApp(options: AppOptions) {
   const demoTeam=hosted?createDemoTeam({...options.demoTeam,store,now,publicOrigin:hosted.publicOrigin,allowLoopbackRelays:hosted.allowInsecureLoopback,
     getSession:(_req,res)=>{const session=res.locals.session as StoredSession|undefined;return demoEnabled&&session&&hackathonDemo!.sessionValid(session)?session:undefined;},
     getDemoCase:workspace=>{if(!demoEnabled)throw new DomainError(403,'The hackathon demo is disabled.');return hackathonDemo!.view(workspace);}}):undefined;
+  // Keyset pagination bounds each sweep and resumes older pending invoices
+  // after restart. Only read existing, provider-verifiable Lightning requests.
+  let paymentCursor=0;
+  app.locals.detectPayments=async()=>{
+    const rows=store.db.prepare('SELECT rowid,id,workspace,data FROM receiving_requests WHERE payment_key IS NULL AND rowid>? ORDER BY rowid LIMIT 64').all(paymentCursor);
+    for(const row of rows){
+      paymentCursor=Number(row.rowid);
+      try{
+        const workspace=String(row.workspace),id=String(row.id);
+        const record=store.decode<ReceivingRecord>(row.data,'receiving_requests',id,workspace);
+        if(record.mode!=='live'||record.method!=='lightning'||record.status!=='awaiting_payment'||!record.intent?.cashuWalletHandoff||receivingRequestExpiry(record)<=now().getTime())continue;
+        if(await demoLivePayments?.detect(workspace,id))continue;
+        await receivingFor(workspace).check(id,workspace);
+      }catch{/* Provider unavailable or connection removed. Retry on a later sweep. */}
+    }
+    if(rows.length<64)paymentCursor=0;
+  };
   app.locals.demoTeam=demoTeam;
   app.locals.communications=communications;
   let storeClosed=false;const closeStore=()=>{if(!storeClosed){storeClosed=true;store.close();}};

@@ -36,6 +36,18 @@ export function DemoLivePayment(){
       .catch(()=>{if(active)setError('The real-payment sample is unavailable right now.');});
     return()=>{active=false;};
   },[]);
+  useEffect(()=>{
+    if(busy||view?.request?.status!=='awaiting_payment'||!expiry||expiry<=Date.now())return;
+    let active=true,pending=false;
+    const timer=setInterval(async()=>{
+      if(pending||document.hidden)return;
+      pending=true;
+      try{const next=checkedView(await api<DemoLivePaymentView>('/api/hackathon-demo/live-payment'));if(active)setView(next);}
+      catch{/* Retain the last verified view. */}
+      finally{pending=false;}
+    },5000);
+    return()=>{active=false;clearInterval(timer);};
+  },[view?.request?.status,expiry,busy]);
   if(!view)return error?<p className="micro demo-live-payment" role="alert">{error}</p>:null;
   if(!view.enabled)return <section className="panel demo-live-payment" aria-label="Optional real Lightning payment sample">
     <h2>Optional real Lightning sample</h2>

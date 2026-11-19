@@ -44,6 +44,20 @@ export function ReceivePage({token}:{token:string}){
   async function load(){const current=++generation.current;setRecord(null);setLoadedFor('');setError('');setBusy(false);try{const result=await api<{request:ReceiveRequest}>(`/api/receive/${encodeURIComponent(token)}`);if(current===generation.current){setRecord(result.request);setLoadedFor(token);}}catch(e){if(current===generation.current)setError((e as Error).message);}}
   useEffect(()=>{void load();document.title='Payment request · Quiet Ledger';return()=>{generation.current++;};},[token]);
   async function check(){if(!request||busy)return;const current=generation.current;setBusy(true);setError('');try{const result=await post<{request:ReceiveRequest}>(`/api/receive/${encodeURIComponent(token)}/check`,{});if(current===generation.current)setRecord(result.request);}catch(e){if(current===generation.current)setError((e as Error).message);}finally{if(current===generation.current)setBusy(false);}}
+  useEffect(()=>{
+    if(request?.status!=='awaiting_payment'||!request.intent?.cashuWalletHandoff||busy)return;
+    let active=true,pending=false;
+    const timer=setInterval(async()=>{
+      if(pending||document.hidden)return;
+      pending=true;
+      try{
+        const result=await api<{request:ReceiveRequest}>(`/api/receive/${encodeURIComponent(token)}`);
+        if(active)setRecord(result.request);
+      }catch{/* Keep the last confirmed state while disconnected. */}
+      finally{pending=false;}
+    },5000);
+    return()=>{active=false;clearInterval(timer);};
+  },[token,request?.status,request?.intent?.cashuWalletHandoff,busy]);
   const paid=request?.status==='paid'&&Boolean(request.receipt),live=request?.mode==='live';
   return <div className="public-page receipt-page"><header className="public-header"><Brand compact/><Badge tone={live?'good':'warm'}>{request?live?'Live payment':'Test payment':'Payment request'}</Badge></header>
     {!request?<main className="public-error">{error?<ErrorMessage message={error} onRetry={()=>void load()}/>:<Loading label="Opening your payment request…"/>}</main>:<main className="receipt-paper receive-paper">

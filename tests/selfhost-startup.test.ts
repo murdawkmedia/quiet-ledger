@@ -14,7 +14,7 @@ test('actual self-host startup serves client/account API, starts empty encrypted
  writeFileSync(join(client,'index.html'),'<!doctype html><title>Fictional standalone production build</title>');
  const storage=join(secrets,'storage'),proxy=join(secrets,'proxy'),backup=join(secrets,'backup');for(const [p,n] of [[storage,21],[proxy,22],[backup,23]] as const)writeFileSync(p,Buffer.alloc(32,n).toString('base64url')+'\n',{mode:0o600});
  const port=await freePort(),origin='http://localhost:'+port;
- const env={PATH:process.env.PATH,NODE_ENV:'production',SELF_HOSTED:'true',PUBLIC_ORIGIN:origin,HOST:'127.0.0.1',PORT:String(port),DATA_DIR:data,BACKUP_DIR:backups,STORAGE_KEY_FILE:storage,PROXY_SHARED_SECRET_FILE:proxy,BACKUP_KEY_FILE:backup,SELFHOST_CLIENT_DIR:client};
+ const env={TMPDIR:dir,PATH:process.env.PATH,NODE_ENV:'production',SELF_HOSTED:'true',PUBLIC_ORIGIN:origin,HOST:'127.0.0.1',PORT:String(port),DATA_DIR:data,BACKUP_DIR:backups,STORAGE_KEY_FILE:storage,PROXY_SHARED_SECRET_FILE:proxy,BACKUP_KEY_FILE:backup,SELFHOST_CLIENT_DIR:client};
  let child:ReturnType<typeof spawn>|undefined;let output='';
  async function start(){child=spawn(process.execPath,['--import','tsx','server/index.ts'],{cwd:root,env,stdio:['ignore','pipe','pipe']});child.stdout!.on('data',part=>{output+=part;});child.stderr!.on('data',part=>{output+=part;});
   const deadline=Date.now()+8000;while(Date.now()<deadline){if(child.exitCode!==null)break;try{const res=await fetch('http://127.0.0.1:'+port+'/api/health');if(res.ok)return;}catch{}await new Promise(r=>setTimeout(r,50));}throw new Error('Synthetic self-host process did not become ready: '+output.slice(-1500));

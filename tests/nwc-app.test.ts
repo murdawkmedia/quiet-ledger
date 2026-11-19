@@ -44,7 +44,8 @@ test('encrypted NWC connection survives restart and settles one original Lightni
   const check=`/api/receive/${received.body.request.token}/check`;
   assert.equal((await publicPost(check,{})).body.request.status,'awaiting_payment');
   await f.restart();f.wallet.setPaid(true);
-  const paid=await publicPost(check,{});assert.equal(paid.status,200);assert.equal(paid.body.request.status,'paid');
+  await f.app.locals.detectPayments();await f.app.locals.detectPayments();
+  const paid=await owner.get('/api/receiving/'+received.body.request.id);assert.equal(paid.status,200);assert.equal(paid.body.request.status,'paid');
   assert.equal(paid.body.request.receipt.method,'lightning');assert.equal(paid.body.request.receipt.mode,'live');assert.equal(paid.body.request.receipt.amount,2100);
   assert.equal((await publicPost(check,{})).body.request.id,received.body.request.id);
   assert.equal(Number(f.store.db.prepare('SELECT COUNT(*) AS n FROM invoice_ledger_entries').get()!.n),1);

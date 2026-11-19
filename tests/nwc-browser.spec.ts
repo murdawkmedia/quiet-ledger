@@ -13,8 +13,8 @@ test('actual saved NWC wallet to SAT invoice, payer checkout and one Lightning r
  await expect(page.getByRole('heading',{name:'A place for your payment.',exact:true})).toBeVisible();await expect(page.getByText('2,100 sats',{exact:true})).toBeVisible();
  await page.setViewportSize({width:390,height:844});await page.getByRole('button',{name:'Check payment',exact:true}).click();await expect(page.getByRole('heading',{name:'A place for your payment.',exact:true})).toBeVisible();
  await page.request.post('/__fixture/paid');
- await expect.poll(async()=>{const state=await(await page.request.get('/__fixture/status')).json();const checks=state.calls.filter((x:string)=>x==='lookup_invoice').length;if(checks<2)await page.getByRole('button',{name:'Check payment',exact:true}).click();return checks;},{intervals:[1000],timeout:8000}).toBe(2);
- await expect(page.getByRole('heading',{name:'Payment verified.',exact:true})).toBeVisible();
+
+ await expect(page.getByRole('heading',{name:'Payment verified.',exact:true})).toBeVisible({timeout:12000});
  const paid=await(await page.request.get('/api/invoices/'+invoice.id)).json();expect(paid.nativePayment.verification).toBe('provider');expect(JSON.stringify(paid.nativePayment)).not.toContain(fictionalNwcWallet().walletPubkey);
  const calls=(await(await page.request.get('/__fixture/status')).json()).calls;expect(calls.filter((x:string)=>x==='make_invoice')).toHaveLength(1);expect(calls.some((x:string)=>['pay_invoice','sign_message','get_balance','list_transactions'].includes(x))).toBe(false);expect(errors).toEqual([]);
 });

@@ -125,9 +125,12 @@ export function createNwcReceivingAdapter(config:NwcReceivingConfig&{id:string})
   if(intent.providerId!==decoded.hash||opaque.hash!==decoded.hash||intent.allocationKey!==`lightning:mainnet:${c.parsed.walletPubkey}:${decoded.hash}`||intent.expiresAt!==new Date(Math.min(decoded.expires*1000,Date.parse(context.expiresAt))).toISOString())throw unavailable();
   return decoded;
  }
- function validTransaction(result:Record<string,any>,context:ReceivingContext,invoice:string,decoded:InvoiceDetails){
+ function validTransaction(result:Record<string,any>,context:ReceivingContext,invoice:string,decoded:InvoiceDetails,lookup=false){
   if(result.type!=='incoming'||result.invoice!==undefined&&result.invoice!==null&&result.invoice!==invoice||result.payment_hash!==decoded.hash||result.amount!==Number(BigInt(context.expectedAtomic)*1000n))throw unavailable();
-  if(result.created_at!==undefined&&(!integer(result.created_at)||result.created_at<Math.floor(Date.parse(context.createdAt)/1000)||result.created_at>Math.floor(c.now()/1000)+5))throw unavailable();
+  // Coinos can return an older metadata timestamp on lookup. Accept that
+  // discrepancy only with the exact signed invoice and proof of settlement.
+  const provenLookup=lookup&&result.invoice===invoice&&result.state==='settled'&&integer(result.settled_at)&&hex(result.preimage)&&sha(Buffer.from(result.preimage,'hex'))===decoded.hash;
+  if(result.created_at!==undefined&&(!integer(result.created_at)||result.created_at<0||(!provenLookup&&result.created_at<Math.floor(Date.parse(context.createdAt)/1000))||result.created_at>Math.floor(c.now()/1000)+5))throw unavailable();
   if(result.expires_at!==undefined&&result.expires_at!==null&&result.expires_at!==decoded.expires)throw unavailable();
  }
  return {id:config.id,mode:'live',methods:['lightning'],walletOptionIds:['nwc'],label:'Nostr Wallet Connect',
@@ -154,14 +157,14 @@ export function createNwcReceivingAdapter(config:NwcReceivingConfig&{id:string})
    let result:Record<string,any>;
    try{result=await c.call('lookup_invoice',{payment_hash:decoded.hash},await c.ready());}catch{throw unavailable();}
    try{
-    validTransaction(result,context,intent.request!.slice(10),decoded);
+    validTransaction(result,context,intent.request!.slice(10),decoded,true);
     // A wallet may report its creation time as settled_at. A lookup finishing
     // outside the original window therefore cannot authorize automatic credit.
     if(c.now()>=Math.min(decoded.expires*1000,Date.parse(context.expiresAt)))throw unavailable();
     const settled=result.settled_at!==undefined&&result.settled_at!==null;
     if(result.state!==undefined&&(!['pending','accepted','settled'].includes(result.state)||(result.state==='settled')!==settled))throw unavailable();
     if(!settled)return {status:'pending'};
-    if(!integer(result.settled_at)||result.settled_at<Math.floor(Date.parse(context.createdAt)/1000)||result.settled_at>Math.floor(c.now()/1000)+5||result.settled_at>decoded.expires||result.settled_at*1000>Date.parse(context.expiresAt))throw unavailable();
+    if(!integer(result.settled_at)||result.settled_at<decoded.created||result.settled_at>Math.floor(c.now()/1000)+5||result.settled_at>decoded.expires||result.settled_at*1000>Date.parse(context.expiresAt))throw unavailable();
     if(result.preimage!==undefined&&result.preimage!==null&&(!hex(result.preimage)||sha(Buffer.from(result.preimage,'hex'))!==decoded.hash))throw unavailable();
     return {status:'paid',paymentId:`lightning:mainnet:${decoded.hash}`,reference:context.requestId,amount:context.amount,currency:context.currency};
    }catch{return {status:'review',reason:review};}

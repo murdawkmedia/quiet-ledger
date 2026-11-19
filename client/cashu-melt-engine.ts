@@ -118,7 +118,7 @@ async function result(p:PreparedCashuMelt,response:Record<string,any>,request:sd
 }
 const executed=new WeakSet<PreparedCashuMelt>();
 export async function executeCashuMelt(p:PreparedCashuMelt,options:CashuMeltOptions={}):Promise<CashuMeltResult>{
- try{if(executed.has(p))return unknown();executed.add(p);const outputs=await preparedFacts(p,options.now??Date.now,true),request=transport(p.mint,options.request);const response=await call(request,p.mint,'/v1/melt/bolt11',{quote:p.private.quote.quote,inputs:p.private.inputs,outputs:outputs.map(o=>o.blindedMessage)});return await result(p,response,request,false);}catch{return unknown();}
+ try{if(executed.has(p))return unknown();executed.add(p);const outputs=await preparedFacts(p,options.now??Date.now,true),request=transport(p.mint,options.request);const response=await call(request,p.mint,'/v1/melt/bolt11',{quote:p.private.quote.quote,inputs:p.private.inputs.map(i=>({...i,amount:number(i.amount,1)})),outputs:outputs.map(o=>({...o.blindedMessage,amount:number(o.blindedMessage.amount)}))});return await result(p,response,request,false);}catch{return unknown();}
 }
 export async function recoverCashuMelt(p:PreparedCashuMelt,options:CashuMeltOptions={}):Promise<CashuMeltResult>{
  try{await preparedFacts(p,options.now??Date.now,false);const request=transport(p.mint,options.request),response=await call(request,p.mint,'/v1/melt/quote/bolt11/'+p.private.quote.quote);return await result(p,response,request,true);}catch{return unknown();}

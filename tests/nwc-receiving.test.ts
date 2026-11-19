@@ -163,3 +163,11 @@ test('expired metadata preflight never publishes make_invoice',async()=>{
  await assert.rejects(make(f,()=>clock).create(context({expiresAt:new Date((sec+30)*1000).toISOString()})));
  assert.equal(f.calls.filter(c=>c.method==='make_invoice').length,0);
 });
+
+test('older wallet metadata can accompany a proven on-time settlement',async()=>{
+ const intent=await make(fixture()).create(context());
+ const tx={created_at:sec-604800,state:'settled',preimage,settled_at:sec};
+ for(const [result,expected] of [[tx,'paid'],[{...tx,preimage:null},'review'],[{...tx,invoice:null},'review'],[{...tx,settled_at:sec-1},'review']] as const){
+  assert.equal((await make(fixture({paid:true,result})).check(context(),intent)).status,expected);
+ }
+});
