@@ -13,7 +13,7 @@
     "build": "npm run typecheck && vite build",
     "test": "tsx --test tests/*.test.ts",
     "test:cashu": "node --max-old-space-size=512 tests/cashu/run.mjs",
-    "test:e2e": "playwright test && playwright test --config tests/hardening-browser.config.ts && npm run test:e2e:accounts && npm run test:e2e:passkeys && npm run test:e2e:connections && npm run test:e2e:saved-connections && npm run test:e2e:marmot && npm run test:e2e:email && npm run test:e2e:business && npm run test:e2e:messages && npm run test:e2e:inbox",
+    "test:e2e": "playwright test && playwright test --config tests/hardening-browser.config.ts && npm run test:e2e:accounts && npm run test:e2e:passkeys && npm run test:e2e:connections && npm run test:e2e:saved-connections && npm run test:e2e:marmot && npm run test:e2e:email && npm run test:e2e:business && npm run test:e2e:messages && npm run test:e2e:inbox && playwright test --config tests/cashu-external-browser.config.ts && playwright test --config tests/demo-join-latency-browser.config.ts",
     "test:e2e:core": "playwright test",
     "test:e2e:adversarial": "playwright test --config tests/hardening-browser.config.ts",
     "mcp": "node --import tsx server/mcp.ts",
