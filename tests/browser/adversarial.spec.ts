@@ -174,7 +174,7 @@ test('mobile sample checkout and navigation preserve demo boundaries',async({pag
   for(const path of ['/dashboard','/invoices','/invoices/new','/payouts','/records','/integrations','/sample-store']){await page.goto(path);await expect(page.locator('h1')).toBeVisible();await noOverflow(page);}
   await page.getByRole('button',{name:'Open navigation',exact:true}).click();await expect(page.getByRole('navigation',{name:'Main navigation'})).toBeVisible();
   await expect(page.getByRole('link',{name:'Square sandbox',exact:true})).toHaveCount(0);await expect(page.getByRole('link',{name:'Private scenario',exact:true})).toHaveCount(0);
-  await page.getByRole('button',{name:'Close navigation',exact:true}).first().click();
+  await page.getByRole('complementary').getByRole('button',{name:'Close navigation',exact:true}).click();
   const created=page.waitForResponse(r=>r.url().endsWith('/api/sample-checkout')&&r.request().method()==='POST');await page.getByRole('button',{name:'Try sample checkout',exact:true}).click();
   expect((await created).status()).toBe(201);await expect(page.getByRole('heading',{name:'Field notes — website checkout',exact:true})).toBeVisible();
   await page.getByRole('button',{name:'Card Square simulation',exact:true}).click();await page.getByRole('button',{name:'Pay with simulated card',exact:true}).click();
