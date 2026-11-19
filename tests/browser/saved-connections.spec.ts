@@ -42,8 +42,8 @@ test('saved bank setup survives sign-in and serves instructions from public chec
   expect((await(await page.request.get('/api/session')).json()).accountId).toBe(first.accountId);
   const list=await(await page.request.get('/api/account/connections')).json();expect(list.connections[0].id).toBe(connection.id);expect(JSON.stringify(list)).not.toContain(instructions);
   await page.goto('/invoices/new');await page.getByLabel('Customer name',{exact:true}).fill('Fictional connection customer');await page.getByLabel('Invoice title',{exact:true}).fill('Fictional saved bank invoice');await page.getByLabel('Item 1 description',{exact:true}).fill('Fictional service');await page.getByLabel('Item 1 unit price',{exact:true}).fill('1.25');
-  const invoiceResponse=page.waitForResponse(response=>new URL(response.url()).pathname==='/api/invoices'&&response.request().method()==='POST');await page.getByRole('button',{name:'Create invoice',exact:true}).click();
-  const created=await invoiceResponse;expect(created.status()).toBe(201);const invoice=await created.json();
+  const invoiceResponse=page.waitForResponse(response=>/\/invoice-drafts\/[^/]+\/issue$/.test(new URL(response.url()).pathname)&&response.request().method()==='POST');await page.getByRole('button',{name:'Create invoice',exact:true}).click();
+  const created=await invoiceResponse;expect(created.status()).toBe(201);const {invoice}=await created.json();
   const publicContext=await browser.newContext(),payer=await publicContext.newPage();
   try{
     await payer.goto(`${origin}/pay/${invoice.token}`);await expect(payer.getByRole('heading',{name:'Choose how to pay.',exact:true})).toBeVisible();
