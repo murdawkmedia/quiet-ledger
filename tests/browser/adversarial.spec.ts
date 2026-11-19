@@ -107,7 +107,7 @@ test('lost invoice creation response retries without adding a second invoice',as
     if(first){first=false;await route.fetch();await route.abort('connectionreset');}else await route.continue();
   });
   await page.getByRole('button',{name:'Create invoice',exact:true}).click();await expect(page.getByRole('alert')).toContainText('fetch');
-  await page.getByRole('button',{name:'Create invoice',exact:true}).click();await expect(page).toHaveURL(/\/invoices$/);
+  await page.getByRole('button',{name:'Retry saved invoice',exact:true}).click();await expect(page).toHaveURL(/\/invoices$/);
   expect(keys).toHaveLength(2);expect(keys[0]).toBe(keys[1]);
   const {invoices}=await(await page.request.get('/api/invoices')).json();expect(invoices.filter((i:Invoice)=>i.title==='Fictional lost response '+caseId(info))).toHaveLength(1);
 });
@@ -118,8 +118,8 @@ test('lost payment response and rapid retry produce one receipt',async({page},in
   let first=true;const keys:string[]=[];
   await page.route('**/api/checkout/*/pay',async route=>{keys.push(route.request().headers()['idempotency-key']);if(first){first=false;await route.fetch();await route.abort('connectionreset');}else await route.continue();});
   await page.getByRole('button',{name:'Pay with simulated Cashu',exact:true}).click();await expect(page.getByRole('alert')).toContainText('fetch');
-  await page.getByRole('button',{name:'Pay with simulated Cashu',exact:true}).click();await expect(page.getByRole('heading',{name:'Payment recorded.',exact:true})).toBeVisible();
-  expect(keys[0]).toBe(keys[1]);await page.getByRole('link',{name:'View payment receipt',exact:true}).click();const receiptURL=page.url();
+  await page.getByRole('button',{name:'Retry saved payment request',exact:true}).click();await expect(page.getByRole('heading',{name:'Payment recorded.',exact:true})).toBeVisible();
+  expect(keys).toHaveLength(2);expect(keys[0]).toBe(keys[1]);await page.getByRole('link',{name:'View payment receipt',exact:true}).click();const receiptURL=page.url();
   await page.goBack();await expect(page.getByRole('heading',{name:'Payment recorded.',exact:true})).toBeVisible();await page.reload();
   await page.getByRole('link',{name:'View payment receipt',exact:true}).click();expect(page.url()).toBe(receiptURL);
 });
